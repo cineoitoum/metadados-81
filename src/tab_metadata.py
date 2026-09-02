@@ -21,6 +21,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import clipboard_engine as ce
 import theme
+import fileinfo_engine as fi
 import resize_engine as rz
 from metadata_engine import (
     ALL_FIELD_KEYS,
@@ -168,9 +169,6 @@ class MetadataTab(ttk.Frame):
         left.pack(side="left", fill="y", padx=(0, 15))
         self.thumb_label = ttk.Label(left, text="(sem preview)", relief="groove", anchor="center")
         self.thumb_label.pack()
-        self.date_label = ttk.Label(left, text="Data (EXIF câmera): —", wraplength=THUMB_MAX)
-        self.date_label.pack(pady=(10, 0), anchor="w")
-
         # A data passa a ser EDITÁVEL. Câmera com data errada, foto
         # escaneada e material de arquivo são casos reais em que a data da
         # captura precisa ser corrigida à mão. Vazio = mantém a da câmera.
@@ -180,10 +178,19 @@ class MetadataTab(ttk.Frame):
         ttk.Label(left, text="Deixe em branco para manter a data da câmera.",
                   style="Dim.TLabel", wraplength=THUMB_MAX, justify="left"
                   ).pack(anchor="w")
-        self.gps_label = ttk.Label(left, text="GPS (EXIF câmera): —", wraplength=THUMB_MAX)
-        self.gps_label.pack(pady=(4, 0), anchor="w")
-        self.res_label = ttk.Label(left, text="Resolução: —", wraplength=THUMB_MAX)
-        self.res_label.pack(pady=(4, 0), anchor="w")
+        # Aviso do perfil sobre o tamanho. Separado da ficha porque é
+        # julgamento, não dado: a ficha diz o que a foto É, isto diz se
+        # ela serve pro perfil ativo.
+        self.res_label = ttk.Label(left, text="", wraplength=THUMB_MAX, justify="left")
+        self.res_label.pack(pady=(8, 0), anchor="w")
+
+        # FICHA TÉCNICA — tudo o que o arquivo sabe sobre si, agrupado.
+        # Substitui os rótulos avulsos de data e GPS que havia aqui.
+        ttk.Label(left, text="Ficha técnica", style="Section.TLabel").pack(
+            anchor="w", pady=(12, 2))
+        self.info_frame = ttk.Frame(left)
+        self.info_frame.pack(fill="x")
+        self._render_fileinfo([])
 
         # coluna direita: campos
         right = ttk.Frame(body)
@@ -506,6 +513,8 @@ class MetadataTab(ttk.Frame):
         self._fill_form(existing)
         self._set_date_entry(existing.date_created)
         self._update_resize_label()
+        # a ficha é lida do arquivo, então só faz sentido depois de abrir
+        self._refresh_fileinfo()
         self._update_side_labels(camera_dt, shorter_edge, gps)
         self._load_thumbnail(path)
         self.custom_editor.clear()  # campos avançados são específicos de cada gravação
@@ -763,21 +772,51 @@ class MetadataTab(ttk.Frame):
                 continue
         return None
 
+    def _render_fileinfo(self, secoes):
+        """Desenha a ficha. Reconstrói inteira a cada foto: são poucas
+        dezenas de rótulos, e reconstruir é mais simples — e menos sujeito
+        a sobra de dado da foto anterior — do que atualizar campo a
+        campo."""
+        for filho in self.info_frame.winfo_children():
+            filho.destroy()
+
+        if not secoes:
+            ttk.Label(self.info_frame, text="Abra uma foto para ver a ficha.",
+                      style="Dim.TLabel", wraplength=THUMB_MAX,
+                      justify="left").pack(anchor="w")
+            return
+
+        for titulo, linhas in secoes:
+            ttk.Label(self.info_frame, text=titulo.upper(),
+                      style="CardMono.TLabel").pack(anchor="w", pady=(8, 2))
+            for rotulo, valor in linhas:
+                linha = ttk.Frame(self.info_frame)
+                linha.pack(fill="x")
+                ttk.Label(linha, text=rotulo, style="Dim.TLabel",
+                          width=15, anchor="w").pack(side="left")
+                ttk.Label(linha, text=valor, wraplength=THUMB_MAX - 130,
+                          justify="left").pack(side="left", fill="x", expand=True)
+
+    def _refresh_fileinfo(self):
+        try:
+            secoes = fi.describe(self.current_path) if self.current_path else []
+        except Exception:
+            secoes = []
+        self._render_fileinfo(secoes)
+
     def _update_side_labels(self, camera_dt, shorter_edge, gps):
-        if camera_dt:
-            self.date_label.configure(text=f"Data (EXIF câmera): {camera_dt.strftime('%d/%m/%Y %H:%M:%S')}")
-        else:
-            self.date_label.configure(text="Data (EXIF câmera): NÃO ENCONTRADA")
-
-        self.gps_label.configure(text=f"GPS (EXIF câmera): {gps}" if gps else "GPS (EXIF câmera): não encontrado")
-
         min_edge = get_profile(self.active_profile_key)["min_edge"]
-        if shorter_edge:
-            ok = (min_edge is None) or (shorter_edge >= min_edge)
-            extra = "" if ok or not min_edge else f" (abaixo do mínimo de {min_edge}px)"
-            self.res_label.configure(text=f"Menor borda: {shorter_edge}px{extra}")
+        if shorter_edge and min_edge and shorter_edge < min_edge:
+            self.res_label.configure(
+                text="⚠ Menor borda tem %dpx — o perfil ativo exige %dpx."
+                     % (shorter_edge, min_edge),
+                style="Warning.TLabel")
+        elif shorter_edge:
+            self.res_label.configure(text="✓ Tamanho compatível com o perfil ativo.",
+                                     style="Dim.TLabel")
         else:
-            self.res_label.configure(text="Resolução: não foi possível determinar")
+            self.res_label.configure(text="Não consegui medir a resolução.",
+                                     style="Warning.TLabel")
 
     def _load_thumbnail(self, path):
         if not PIL_AVAILABLE:
