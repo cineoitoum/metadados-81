@@ -118,7 +118,18 @@ exe = EXE(
     upx=False,           # UPX corrompe binarios assinados no macOS
     console=False,       # app de janela: sem terminal preto atras
     disable_windowed_traceback=False,
-    argv_emulation=IS_MACOS,   # permite abrir arquivos arrastados no Dock
+    # argv_emulation DESLIGADO de proposito.
+    #
+    # Ele instala um manipulador de AppleEvents e roda um laco de eventos
+    # ANTES do Tk inicializar. Com isso, o Tk_CreateConsoleWindow do Tk
+    # aborta ao montar a barra de menus da janela de console, e o app
+    # morre no primeiro tk.Tk() — mas SO quando lancado pelo Finder, que
+    # e o unico jeito que manda AppleEvents. Lancado por linha de comando
+    # funcionava, o que escondeu o defeito.
+    #
+    # O que se perde: abrir arquivos arrastados sobre o icone no Dock.
+    # O app ja abre por dialogo e por arrastar-para-dentro-da-janela.
+    argv_emulation=False,
     target_arch=None,          # segue a arquitetura de quem constroi
     codesign_identity=None,
     entitlements_file=None,
