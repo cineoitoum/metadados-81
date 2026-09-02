@@ -41,10 +41,72 @@ class App(_BaseTk):
         ttk.Label(cabecalho, text="  metadados IPTC/XMP",
                   style="ContainerDim.TLabel").pack(side="left")
 
+        self._build_menubar()
+
         self.metadata_tab = MetadataTab(self)
         self.metadata_tab.pack(fill="both", expand=True)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _build_menubar(self):
+        """Monta a barra de menus do sistema.
+
+        DUAS RAZÕES, e a primeira é um crash de verdade:
+
+        1. No macOS, um app EMPACOTADO sem menu de aplicativo faz o Tk
+           tentar montar um sozinho e abortar em
+           NSMenuItem initWithTitle: com título nulo. Rodando do
+           código-fonte não acontece — só dentro do .app, que é
+           exatamente onde o usuário abre. O menu "apple" precisa existir,
+           nem que seja vazio.
+
+        2. Sem um menu Editar, ⌘X/⌘C/⌘V NÃO funcionam nos campos de texto
+           do Tk no macOS. O Tk depende dos itens de menu para disparar os
+           eventos virtuais de recortar, copiar e colar.
+        """
+        menubar = tk.Menu(self)
+
+        if platform_utils.is_macos():
+            # precisa chamar-se "apple" — é o nome que o Tk procura
+            apple = tk.Menu(menubar, name="apple")
+            menubar.add_cascade(menu=apple)
+            apple.add_command(label="Sobre o %s" % theme.APP_NAME,
+                              command=self._show_about)
+            apple.add_separator()
+
+        editar = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Editar", menu=editar)
+        for rotulo, evento, atalho in (
+            ("Recortar", "<<Cut>>", "Command-x"),
+            ("Copiar", "<<Copy>>", "Command-c"),
+            ("Colar", "<<Paste>>", "Command-v"),
+        ):
+            editar.add_command(
+                label=rotulo,
+                accelerator="⌘" + atalho[-1].upper() if platform_utils.is_macos()
+                            else "Ctrl+" + atalho[-1].upper(),
+                command=lambda e=evento: self._post_event(e))
+        editar.add_separator()
+        editar.add_command(label="Selecionar tudo",
+                           command=lambda: self._post_event("<<SelectAll>>"))
+
+        self.configure(menu=menubar)
+
+    def _post_event(self, evento):
+        """Dispara o evento virtual no widget que está com o foco."""
+        alvo = self.focus_get()
+        if alvo is not None:
+            try:
+                alvo.event_generate(evento)
+            except tk.TclError:
+                pass
+
+    def _show_about(self):
+        messagebox.showinfo(
+            "Sobre o %s" % theme.APP_NAME,
+            "%s 1.0\n\nEdição de metadados IPTC/XMP de fotos.\n\n"
+            "Os pixels não são recomprimidos: o ExifTool reescreve apenas "
+            "os blocos de metadado.\n\nLicença MIT." % theme.APP_NAME)
 
     def _on_close(self):
         # grava as preferências de campos "de casa" antes de sair
