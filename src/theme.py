@@ -431,6 +431,16 @@ def _apply_buttons(style: ttk.Style) -> None:
               bordercolor=[("active", PEACH)],
               foreground=[("disabled", STEEL_SOFT)])
 
+    # contorno claro sobre bloco steel — o Ghost usa fundo creme e sobre
+    # a barra escura vira um retângulo claro, não um botão discreto
+    style.configure("ContainerGhost.TButton", background=STEEL, foreground=ON_STEEL,
+                    font=FONT, borderwidth=1, relief="solid",
+                    bordercolor="#7A939A", padding=(11, 4))
+    style.map("ContainerGhost.TButton",
+              background=[("active", STEEL_DEEP), ("pressed", STEEL_DEEP)],
+              foreground=[("active", PEACH)],
+              bordercolor=[("active", PEACH)])
+
     style.configure("Card.TButton", background=PEACH, foreground=ON_PEACH,
                     font=FONT_BOLD, borderwidth=0, relief="flat", padding=(11, 5))
     style.map("Card.TButton",

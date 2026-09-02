@@ -40,6 +40,8 @@ class App(_BaseTk):
                   font=theme.FONT_SECTION).pack(side="left")
         ttk.Label(cabecalho, text="  metadados IPTC/XMP",
                   style="ContainerDim.TLabel").pack(side="left")
+        ttk.Button(cabecalho, text="Sobre", style="ContainerGhost.TButton",
+                   command=self._show_about).pack(side="right")
 
         self._build_menubar()
 
@@ -102,11 +104,98 @@ class App(_BaseTk):
                 pass
 
     def _show_about(self):
-        messagebox.showinfo(
-            "Sobre o %s" % theme.APP_NAME,
-            "%s 1.0\n\nEdição de metadados IPTC/XMP de fotos.\n\n"
-            "Os pixels não são recomprimidos: o ExifTool reescreve apenas "
-            "os blocos de metadado.\n\nLicença MIT." % theme.APP_NAME)
+        """Janela própria em vez de messagebox: o texto é longo demais
+        para um alerta do sistema, e o endereço precisa ser clicável."""
+        if getattr(self, "_about_window", None) is not None:
+            try:
+                if self._about_window.winfo_exists():
+                    self._about_window.lift()
+                    self._about_window.focus_force()
+                    return
+            except tk.TclError:
+                pass
+
+        janela = tk.Toplevel(self)
+        self._about_window = janela
+        janela.title("Sobre o %s" % theme.APP_NAME)
+        janela.configure(bg=theme.BG_APP)
+        janela.minsize(560, 520)
+        janela.transient(self)
+
+        rodape = ttk.Frame(janela, style="Container.TFrame", padding=(14, 10))
+        rodape.pack(side="bottom", fill="x")
+        ttk.Button(rodape, text="Fechar", style="Neon.TButton",
+                   command=janela.destroy).pack(side="right")
+        ttk.Label(rodape, text="Licença MIT",
+                  style="ContainerDim.TLabel").pack(side="left")
+
+        corpo = ttk.Frame(janela, padding=(18, 16))
+        corpo.pack(fill="both", expand=True)
+
+        faixa = theme.card(corpo, fill=theme.PEACH, padding=16)
+        faixa.pack(fill="x")
+        ttk.Label(faixa, text=theme.APP_NAME, style="PeachTitle.TLabel").pack(anchor="w")
+        ttk.Label(faixa, text="Versão 1.0  ·  macOS e Windows",
+                  style="Peach.TLabel").pack(anchor="w")
+
+        def bloco(titulo, texto, primeiro=False):
+            if titulo:
+                ttk.Label(corpo, text=titulo, style="Section.TLabel").pack(
+                    anchor="w", pady=(14 if not primeiro else 12, 3))
+            ttk.Label(corpo, text=texto, wraplength=500, justify="left").pack(anchor="w")
+
+        bloco("", "Editor de metadados IPTC e XMP para fotografia. Preenche os "
+                  "campos que bancos de imagem, redações e arquivos exigem — e "
+                  "copia esses dados de uma foto para a próxima.", primeiro=True)
+
+        bloco("O que faz",
+              "• Legenda, título, palavras-chave, autor, local, direitos, "
+              "crédito e termos de uso, gravados em IPTC e XMP ao mesmo tempo.\n"
+              "• Copiar e colar metadados entre fotos, com a área de "
+              "transferência sobrevivendo ao fechar o programa.\n"
+              "• Campos que as agências passaram a exigir: declaração de origem "
+              "digital (IA), texto alternativo de acessibilidade e status de "
+              "liberação de modelo e propriedade.\n"
+              "• Perfis de validação por agência — Adobe Stock, Shutterstock e "
+              "Getty — com os limites de cada uma.\n"
+              "• Processamento em lote, escolhendo por campo o que se repete.\n"
+              "• Ficha técnica completa do arquivo e redimensionamento com "
+              "proporção travada.")
+
+        bloco("Como trata suas fotos",
+              "Os pixels não são recomprimidos. O ExifTool reescreve apenas os "
+              "blocos de metadado, e a imagem permanece byte a byte idêntica. A "
+              "única exceção é o redimensionamento, que por definição recodifica "
+              "— e por isso grava uma cópia em vez de sobrescrever.\n\n"
+              "Nada é enviado para a internet. Não há conta, telemetria nem "
+              "sincronização: seus dados ficam apenas neste computador.")
+
+        ttk.Separator(corpo).pack(fill="x", pady=(16, 0))
+
+        bio = theme.card(corpo, padding=14)
+        bio.pack(fill="x", pady=(14, 0))
+        ttk.Label(bio, text="Sobre o autor", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            bio,
+            text="Gustavo Serrate é cineasta e fotógrafo, fundador da CINE 81, "
+                 "produtora audiovisual brasiliense atuando desde 2012 com "
+                 "produção documental e trabalhos institucionais para "
+                 "instituições governamentais, embaixadas, ONGs, organismos "
+                 "internacionais e projetos culturais.",
+            style="Card.TLabel", wraplength=470, justify="left",
+        ).pack(anchor="w", pady=(6, 8))
+
+        link = ttk.Label(bio, text="www.cineoitoum.org", style="CardAccent.TLabel",
+                         cursor="pointinghand")
+        link.pack(anchor="w")
+        link.bind("<Button-1>", lambda _e: self._abrir_site("https://www.cineoitoum.org"))
+
+    def _abrir_site(self, url):
+        import webbrowser
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
 
     def _on_close(self):
         # grava as preferências de campos "de casa" antes de sair
