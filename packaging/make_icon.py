@@ -3,12 +3,19 @@ Gera o ícone do app em pixel art, em .icns (macOS) e .ico (Windows).
 
     python packaging/make_icon.py
 
-O desenho É a grade de 16x16 do MAPA abaixo: cada caractere é um pixel.
-Todos os tamanhos que os dois sistemas pedem (16, 32, 48, 64, 128, 256,
-512, 1024) são múltiplos inteiros de 16, então a ampliação usa NEAREST
-e sai exata — sem borda embaçada e sem meio-pixel. É por isso que o
-ícone de 16px continua legível: ele não é uma redução de um desenho
-grande, é o desenho original.
+São DOIS desenhos, não um. O aspecto pixelado vem da razão entre a
+grade e o tamanho de saída, e a grade precisa dividir o tamanho por
+inteiro — senão a ampliação borra. Como nenhuma grade única divide bem
+16 e 512 ao mesmo tempo, cada faixa de tamanho tem o seu desenho, que
+é como os ícones clássicos de Mac e Windows sempre foram feitos:
+
+    MAPA16  ->  16, 32, 48      (menu, lista do Finder, barra de tarefas)
+    MAPA64  ->  64 a 1024       (Dock, Finder em ícones, tela cheia)
+
+Cada caractere dos mapas é um pixel, e a ampliação usa NEAREST: nenhuma
+borda embaçada, nenhum meio-pixel. O fundo é transparente.
+
+Pra mexer no desenho basta trocar caracteres. A legenda está em CORES.
 
 Precisa só do Pillow, que já é dependência do app.
 """
@@ -22,22 +29,27 @@ from PIL import Image
 RAIZ = Path(__file__).resolve().parent.parent
 ASSETS = RAIZ / "assets"
 
-
 # ---------------------------------------------------------------- paleta
 CORES = {
-    ".": (0, 0, 0, 0),          # vazio
-    "K": (34, 51, 58, 255),     # contorno, quase preto azulado
-    "T": (122, 146, 152, 255),  # chapa de cima, steel clareado
-    "S": (63, 90, 98, 255),     # corpo, steel
-    "P": (254, 130, 84, 255),   # aro da lente, peach
-    "D": (44, 65, 73, 255),     # vidro da lente
-    "W": (150, 180, 188, 255),  # reflexo no vidro, azul claro
+    ".": (0, 0, 0, 0),            # vazio (fundo transparente)
+    "K": (26, 40, 46, 255),       # contorno
+    "T": (138, 162, 168, 255),    # chapa de cima, luz
+    "t": (108, 132, 139, 255),    # chapa de cima, meio-tom
+    "u": (84, 106, 113, 255),     # chapa de cima, sombra
+    "S": (63, 90, 98, 255),       # corpo
+    "h": (80, 108, 116, 255),     # corpo, luz
+    "s": (48, 70, 77, 255),       # corpo, sombra
+    "B": (44, 65, 73, 255),       # barril da lente
+    "b": (62, 86, 94, 255),       # barril, luz
+    "P": (254, 130, 84, 255),     # aro da lente, peach
+    "p": (226, 98, 54, 255),      # peach escurecido
+    "D": (22, 35, 41, 255),       # vidro
+    "d": (34, 52, 60, 255),       # vidro, borda
+    "W": (168, 198, 205, 255),    # reflexo no vidro
 }
 
-# Câmera de frente: chapa de cima mais clara, visor saliente, lente
-# centrada com dois pixels de reflexo no canto superior esquerdo do
-# vidro. Creme puro no reflexo lia como buraco — daí o azul claro.
-MAPA = [
+# Versão mínima: só o que sobrevive a 16 pixels de lado.
+MAPA16 = [
     "................",
     "....KKKK........",
     "...KTTTTK.......",
@@ -56,30 +68,98 @@ MAPA = [
     "................",
 ]
 
-LADO = len(MAPA)
+# Versão detalhada: prisma, seletor, disparador, pega texturada, barril
+# serrilhado e reflexo no vidro.
+MAPA64 = [
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "......................KKKKKKKKKKKKKK............................",
+    ".....................tttttttttttttttt...........................",
+    "....................KtTTTTTTTTTTTTTTtK..........................",
+    ".........KKKKKKKKK..KtTTTTTTTTTTTTTTtK.......KKKKKKKKKK.........",
+    "........KuuuuuuuuuK.KtTTTTTTTTTTTTTTtK......KppppppppppK........",
+    "........KutttttttuK.KtTTTTTTTTTTTTTTtK......KpPPPPPPPPpK........",
+    "........KutttttttuK.KtuuuuuuuuuuuuuutK......KpPPPPPPPPpK........",
+    "........KuuuuuuuuuK.KtuuuuuuuuuuuuuutK......KpPPPPPPPPpK........",
+    "........KuuuuuuuuuK..tuuuuuuuuuuuuuut.......KppppppppppK........",
+    ".....KKKKuuuuuuuuuKKKttttttttttttttttKKKKKKKKppppppppppKKKK.....",
+    "....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT....",
+    "...TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT...",
+    "..KTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTK..",
+    "..KuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuK..",
+    "..KuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuK..",
+    "..KuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuK..",
+    "..KSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSK..",
+    "..KhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhK..",
+    "..KhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhK..",
+    "..KSSSSSSSSSSSSSSSSSSSSSSSSKKKKSSSSSSSSSSSSSSSSSSSSKKKKKKKKSSK..",
+    "..KSSSSSSSSSSSSSSSSSSSSKKKKbbbbKKKKSSSSSSSSSSSSSSShhhhhhhhhhSK..",
+    "..KSSSSSSSSSSSSSSSSSSKKKbbbBKBBbbbKKKSSSSSSSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSSSSSSKKbbBKBBKBBBKBbbKKSSSSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSSSKbbBKBBKppppKBBKBbbKSSSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSSKbbBBKpppPPPPpppKBBbbKSSSSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSSSKKbKKBpPPPPPPPPPPpBKKbKKSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSKbBBBpPPPPddddPPPPpBBBbKSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSKbKBBpPPPddDDDDddPPPpBBKbKSSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSSKbBKpPPPdDWDDDDDDdPPPpKBbKSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSKbbBBpPPdDWWWDDDDDDdPPpBBbbKSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSKbKKpPPdDWWWDDDDDDDDdPPpKKbKSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSKbBBpPPdDWWDDDDDDDDDdPPpBBbKSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSKbBBpPPdDWDDDDDDDDDDdPPpBBbKSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSKbKKpPPdDDDDDDDDDDDDdPPpKKbKSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSKbBBpPPdDDDDDDDDDDDDdPPpBBbKSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSKbBBpPPdDDDDDDDDDDDDdPPpBBbKSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSKbKKpPPdDDDDDDDDDDDDdPPpKKbKSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSKbbBBpPPdDDDDDDDDDDdPPpBBbbKSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSKbBKpPPPdDDDDDDDDdPPPpKBbKSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSKbKBBpPPPddDDDDddPPPpBBKbKSSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSSSKbBBBpPPPPddddPPPPpBBBbKSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSKKbKKBpPPPPPPPPPPpBKKbKKSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSSKbbBBKpppPPPPpppKBBbbKSSSSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSSSSSKbbBKBBKppppKBBKBbbKSSSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSSSSKKbbBKBBBKBBKBbbKKSSSSSSSSSSSKhhhhhhhhhhKK..",
+    "..KSSSSSSSSSSSSSSSSSSKKKbbbBBKBbbbKKKSSSSSSSSSSSSKhsssssssshKK..",
+    "..KSSSSSSSSSSSSSSSSSSSSKKKKbbbbKKKKSSSSSSSSSSSSSSKhhhhhhhhhhKK..",
+    "..KssssssssssssssssssssssssKKKKssssssssssssssssssShhhhhhhhhhSK..",
+    "..KssssssssssssssssssssssssssssssssssssssssssssssSSKKKKKKKKSSK..",
+    "...ssssssssssssssssssssssssssssssssssssssssssssssssssssssssss...",
+    "....ssssssssssssssssssssssssssssssssssssssssssssssssssssssss....",
+    ".....KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK.....",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+    "................................................................",
+]
 
 
-def _base() -> Image.Image:
-    """A grade crua, 16x16, um pixel por caractere."""
-    img = Image.new("RGBA", (LADO, LADO), (0, 0, 0, 0))
+def _grade(mapa):
+    lado = len(mapa)
+    img = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
     px = img.load()
-    for y, linha in enumerate(MAPA):
-        if len(linha) != LADO:
+    for y, linha in enumerate(mapa):
+        if len(linha) != lado:
             raise ValueError("linha %d tem %d colunas, esperava %d"
-                             % (y, len(linha), LADO))
+                             % (y, len(linha), lado))
         for x, ch in enumerate(linha):
             px[x, y] = CORES[ch]
     return img
 
 
 def desenhar(tamanho: int) -> Image.Image:
-    """Amplia por inteiro sempre que der (16, 32, 64...). Só cai no
-    LANCZOS em tamanho que não seja múltiplo de 16, o que na prática
-    nenhum sistema pede."""
-    base = _base()
-    if tamanho % LADO == 0:
-        return base.resize((tamanho, tamanho), Image.NEAREST)
-    return base.resize((tamanho, tamanho), Image.LANCZOS)
+    """Escolhe o desenho cuja grade divide o tamanho por inteiro,
+    preferindo sempre o mais detalhado que couber."""
+    for mapa in (MAPA64, MAPA16):
+        lado = len(mapa)
+        if tamanho >= lado and tamanho % lado == 0:
+            return _grade(mapa).resize((tamanho, tamanho), Image.NEAREST)
+    # nenhum sistema pede um tamanho assim; fica o mínimo, sem borrar
+    return _grade(MAPA16).resize((tamanho, tamanho), Image.NEAREST)
 
 
 def gerar_ico():
