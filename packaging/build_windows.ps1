@@ -11,7 +11,7 @@
 
 $ErrorActionPreference = "Stop"
 $Raiz = Split-Path -Parent $PSScriptRoot
-$Versao = "2.0.0"
+$Versao = "1.0.0"
 $Python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
 
 Write-Host "==> Projeto: $Raiz"

@@ -13,7 +13,7 @@ set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NOME="Metadados 81"
-VERSAO="2.0.0"
+VERSAO="1.0.0"
 
 PYTHON="${PYTHON:-python3}"
 TRABALHO="$(mktemp -d -t metadados81-build)"

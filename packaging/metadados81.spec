@@ -141,16 +141,16 @@ if IS_MACOS:
         name=APP_NAME + ".app",
         icon=_icone(),
         bundle_identifier="com.cine81.metadados81",
-        version="2.0.0",
+        version="1.0.0",
         info_plist={
             "CFBundleName": APP_NAME,
             "CFBundleDisplayName": APP_NAME,
-            "CFBundleShortVersionString": "2.0.0",
-            "CFBundleVersion": "2.0.0",
+            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleVersion": "1.0.0",
             "NSHighResolutionCapable": True,
             # sem isto o macOS abre o app em modo retina emulado e a
             # interface sai borrada
             "LSMinimumSystemVersion": "11.0",
-            "NSHumanReadableCopyright": "CineBrain OS — MIT",
+            "NSHumanReadableCopyright": "Metadados 81 — MIT",
         },
     )
