@@ -1,0 +1,134 @@
+# =====================================================================
+# DADOS DE USUÁRIO — nunca versionar
+# =====================================================================
+# O CineBrain OS guarda todo dado de usuário em
+#   ~/Library/Application Support/CineBrain OS/
+# ou seja, FORA do repositório por construção. As regras abaixo são a
+# segunda linha de defesa: pegam cópias, exports e testes que acabem
+# parando dentro da pasta do projeto por engano.
+#
+# ATENÇÃO: o .gitignore do git NÃO aceita comentário no fim da linha.
+# "*.json  # comentário" vira um padrão literal que não casa com nada.
+# Todo comentário aqui está em linha própria, de propósito.
+
+# Bases e planilhas
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.tsv
+
+# Arquivos de estado do app
+configuracoes.json
+catalogo_prefs.json
+preferencias.json
+modelo_termo_padrao.json
+modelos_contrato.json
+base_projetos.json
+agenda_semanal.json
+clientes.json
+Briefing_e_Job_Info.json
+
+# Pastas de dado local / saída de importação
+dados_locais/
+dados/
+export/
+importacao/
+
+# Documentos gerados
+*.pdf
+!docs/**/*.pdf
+
+# Mídia de teste
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+*.cr2
+*.cr3
+*.nef
+*.arw
+*.dng
+*.raf
+*.orf
+!assets/**
+!docs/**/*.png
+
+# =====================================================================
+# Python
+# =====================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+.installed.cfg
+MANIFEST
+
+# Ambientes virtuais
+.venv/
+venv/
+ENV/
+env/
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =====================================================================
+# Empacotamento
+# =====================================================================
+# A RECEITA de build (packaging/) é versionada de propósito — foi a
+# ausência dela no repositório v1.0 que tornou o DMG irreproduzível.
+# Só a SAÍDA do build é ignorada.
+build/
+dist/
+*.manifest
+*.dmg
+*.app
+
+# ExifTool baixado por packaging/fetch_exiftool.py — ~20 MB que se
+# reconstroem com um comando. Receita se versiona, binario de terceiro
+# baixavel nao.
+vendor/
+
+# A RECEITA e versionada de proposito: foi a ausencia dela no repositorio
+# da v1.0 que tornou o DMG irreproduzivel.
+!packaging/**
+!assets/**
+
+# =====================================================================
+# Sistema e editores
+# =====================================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+.directory
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Bloqueios temporários de Office
+~$*.xlsx
+.~lock.*
+
+# Logs e segredos
+*.log
+logs/
+.env
+.env.local
+.env.*.local

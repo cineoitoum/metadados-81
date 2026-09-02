@@ -1,0 +1,27 @@
+# CineBrain OS — dependências
+#
+# IMPORTANTE — Tcl/Tk 8.6 ou superior é obrigatório.
+#
+# O Python que vem no macOS (/usr/bin/python3, do CommandLineTools) linka
+# contra o Tcl/Tk *de sistema*, que a Apple congelou na 8.5.9 em 2010 e
+# depreciou. Nessa versão o Tk não desenha o conteúdo das janelas em
+# macOS moderno: o app abre inteiramente em branco, sem erro algum.
+#
+# Confira a sua com:
+#     python3 -c "import tkinter; r=tkinter.Tk(); print(r.tk.call('info','patchlevel'))"
+#
+# Se aparecer 8.5.x, instale um Python com Tk moderno:
+#     macOS    brew install python-tk
+#     Windows  o instalador oficial do python.org já traz Tk 8.6
+#     Linux    sudo apt install python3-tk
+#
+# O app checa isso na inicialização e avisa em vez de abrir em branco.
+
+Pillow>=9.0
+openpyxl>=3.8
+reportlab>=4.0
+piexif>=1.1
+
+# Opcional: habilita arrastar-e-soltar de arquivos nas abas.
+# O app funciona sem — só oculta a funcionalidade.
+tkinterdnd2>=0.3
