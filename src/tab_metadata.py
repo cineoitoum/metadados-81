@@ -54,7 +54,10 @@ except ImportError:
 
 
 THUMB_MAX = 360
-STICKY_FIELD_KEYS = ["creator", "creator_url", "city", "state", "country", "copyright", "credit", "source", "usage_terms"]
+STICKY_FIELD_KEYS = [
+    "creator", "creator_url", "sublocation", "city", "state", "country",
+    "country_code", "copyright", "credit", "source", "usage_terms",
+]
 
 
 class MetadataTab(ttk.Frame):
@@ -128,6 +131,16 @@ class MetadataTab(ttk.Frame):
         self.thumb_label.pack()
         self.date_label = ttk.Label(left, text="Data (EXIF câmera): —", wraplength=THUMB_MAX)
         self.date_label.pack(pady=(10, 0), anchor="w")
+
+        # A data passa a ser EDITÁVEL. Câmera com data errada, foto
+        # escaneada e material de arquivo são casos reais em que a data da
+        # captura precisa ser corrigida à mão. Vazio = mantém a da câmera.
+        ttk.Label(left, text="Data criada (AAAA-MM-DD HH:MM):").pack(anchor="w", pady=(6, 0))
+        self.date_entry = ttk.Entry(left)
+        self.date_entry.pack(fill="x")
+        ttk.Label(left, text="Deixe em branco para manter a data da câmera.",
+                  style="Dim.TLabel", wraplength=THUMB_MAX, justify="left"
+                  ).pack(anchor="w")
         self.gps_label = ttk.Label(left, text="GPS (EXIF câmera): —", wraplength=THUMB_MAX)
         self.gps_label.pack(pady=(4, 0), anchor="w")
         self.res_label = ttk.Label(left, text="Resolução: —", wraplength=THUMB_MAX)
@@ -155,7 +168,7 @@ class MetadataTab(ttk.Frame):
         self.instructions_text = tk.Text(right, height=4, wrap="word")
         self.instructions_text.pack(fill="x")
 
-        ttk.Label(right, text="Palavras-chave (separadas por ; ):").pack(anchor="w", pady=(10, 0))
+        ttk.Label(right, text="Palavras-chave / tags (separadas por vírgula):").pack(anchor="w", pady=(10, 0))
         self.keywords_entry = ttk.Entry(right)
         self.keywords_entry.pack(fill="x")
 
@@ -172,8 +185,18 @@ class MetadataTab(ttk.Frame):
         self.creator_url_entry = ttk.Entry(creator_url_col)
         self.creator_url_entry.pack(fill="x")
 
+        # Local (Sub-location IPTC): o lugar ESPECÍFICO dentro da cidade.
+        # Ganha linha inteira porque o texto costuma ser longo.
+        subloc_frame = ttk.Frame(right)
+        subloc_frame.pack(fill="x", pady=(10, 0))
+        ttk.Label(subloc_frame,
+                  text="Local (dentro da cidade — ex.: Praia de Copacabana, Teatro Municipal):"
+                  ).pack(anchor="w")
+        self.sublocation_entry = ttk.Entry(subloc_frame)
+        self.sublocation_entry.pack(fill="x")
+
         loc_frame = ttk.Frame(right)
-        loc_frame.pack(fill="x", pady=(10, 0))
+        loc_frame.pack(fill="x", pady=(6, 0))
         col1 = ttk.Frame(loc_frame)
         col1.pack(side="left", fill="x", expand=True, padx=(0, 5))
         ttk.Label(col1, text="Cidade:").pack(anchor="w")
@@ -185,10 +208,15 @@ class MetadataTab(ttk.Frame):
         self.state_entry = ttk.Entry(col2)
         self.state_entry.pack(fill="x")
         col3 = ttk.Frame(loc_frame)
-        col3.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        col3.pack(side="left", fill="x", expand=True, padx=5)
         ttk.Label(col3, text="País:").pack(anchor="w")
         self.country_entry = ttk.Entry(col3)
         self.country_entry.pack(fill="x")
+        col4 = ttk.Frame(loc_frame)
+        col4.pack(side="left", padx=(5, 0))
+        ttk.Label(col4, text="Cód. ISO:").pack(anchor="w")
+        self.country_code_entry = ttk.Entry(col4, width=8)
+        self.country_code_entry.pack()
 
         rights_frame1 = ttk.Frame(right)
         rights_frame1.pack(fill="x", pady=(10, 0))
@@ -274,9 +302,11 @@ class MetadataTab(ttk.Frame):
         return {
             "creator": self.creator_entry,
             "creator_url": self.creator_url_entry,
+            "sublocation": self.sublocation_entry,
             "city": self.city_entry,
             "state": self.state_entry,
             "country": self.country_entry,
+            "country_code": self.country_code_entry,
             "copyright": self.copyright_entry,
             "credit": self.credit_entry,
             "source": self.source_entry,
@@ -376,6 +406,7 @@ class MetadataTab(ttk.Frame):
         self.path_label.configure(text=os.path.basename(path))
         self._set_photo_fields_enabled(True)
         self._fill_form(existing)
+        self._set_date_entry(existing.date_created)
         self._update_side_labels(camera_dt, shorter_edge, gps)
         self._load_thumbnail(path)
         self.custom_editor.clear()  # campos avançados são específicos de cada gravação
@@ -404,6 +435,25 @@ class MetadataTab(ttk.Frame):
             if value:
                 widgets[key].delete(0, "end")
                 widgets[key].insert(0, value)
+
+    def _set_date_entry(self, valor):
+        self.date_entry.delete(0, "end")
+        if valor:
+            self.date_entry.insert(0, valor.strftime("%Y-%m-%d %H:%M"))
+
+    def _parse_date_entry(self):
+        """Lê a data digitada. Texto inválido devolve None, e o chamador
+        mantém a data da câmera — melhor que gravar data errada."""
+        texto = self.date_entry.get().strip()
+        if not texto:
+            return None
+        for formato in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+                        "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(texto, formato)
+            except ValueError:
+                continue
+        return None
 
     def _update_side_labels(self, camera_dt, shorter_edge, gps):
         if camera_dt:
@@ -452,7 +502,10 @@ class MetadataTab(ttk.Frame):
             credit=self.credit_entry.get().strip(),
             source=self.source_entry.get().strip(),
             usage_terms=self.usage_terms_entry.get().strip(),
-            date_created=self.current_fields.date_created,
+            sublocation=self.sublocation_entry.get().strip(),
+            country_code=self.country_code_entry.get().strip(),
+            # a digitada vence a da câmera; em branco mantém a da câmera
+            date_created=self._parse_date_entry() or self.current_fields.date_created,
         )
 
     # -------------------------------------- área de transferência

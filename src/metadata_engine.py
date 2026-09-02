@@ -98,22 +98,50 @@ class PhotoFields:
     keywords: List[str] = field(default_factory=list)
     creator: str = ""
     creator_url: str = ""
+    sublocation: str = ""   # o lugar dentro da cidade: praia, teatro, bairro
     city: str = ""
     state: str = ""
     country: str = ""
+    country_code: str = ""  # ISO 3166-1 alfa-2/3, exigido por banco de imagens
     copyright: str = ""
     credit: str = ""
     source: str = ""
     usage_terms: str = ""
-    date_created: Optional[datetime] = None  # sempre lido da câmera, não editável
+    # Vem do EXIF da câmera, mas passa a ser EDITÁVEL: câmera com data
+    # errada, foto escaneada e material de arquivo são casos reais em que
+    # a data da captura precisa ser corrigida à mão.
+    date_created: Optional[datetime] = None
 
     def keywords_as_text(self) -> str:
-        return "; ".join(self.keywords)
+        """Exibe separado por vírgula — é como se digita naturalmente e
+        como banco de imagem costuma pedir."""
+        return ", ".join(self.keywords)
 
     @staticmethod
     def keywords_from_text(text: str) -> List[str]:
-        parts = [p.strip() for p in text.split(";")]
-        return [p for p in parts if p]
+        """Aceita vírgula E ponto e vírgula como separador.
+
+        A vírgula é o gesto natural e o padrão dos bancos de imagem; o
+        ponto e vírgula era o separador das versões anteriores e continua
+        valendo, pra não quebrar quem já tem o hábito ou colou de um
+        arquivo antigo.
+
+        Duplicatas são removidas preservando a ordem: em banco de imagem
+        a ordem das palavras-chave é sinal de relevância, então a primeira
+        ocorrência é a que vale."""
+        bruto = (text or "").replace(";", ",")
+        vistos = set()
+        saida = []
+        for parte in bruto.split(","):
+            limpo = parte.strip()
+            if not limpo:
+                continue
+            chave = limpo.lower()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(limpo)
+        return saida
 
 
 # Mapa central: chave de campo -> tags de metadado escritas com o mesmo
@@ -125,9 +153,15 @@ SCALAR_FIELD_TAGS: Dict[str, List[str]] = {
     "instructions": ["IPTC:SpecialInstructions", "XMP-photoshop:Instructions"],
     "creator": ["IPTC:By-line", "XMP-dc:Creator", "EXIF:Artist"],
     "creator_url": ["XMP-iptcCore:CreatorWorkURL"],
+    # Sub-location e o lugar ESPECIFICO dentro da cidade ("Praia de
+    # Copacabana", "Teatro Municipal"). Bancos de imagem usam pra busca
+    # geografica fina, abaixo do nivel de cidade.
+    "sublocation": ["IPTC:Sub-location", "XMP-iptcCore:Location"],
     "city": ["IPTC:City", "XMP-photoshop:City"],
     "state": ["IPTC:Province-State", "XMP-photoshop:State"],
     "country": ["IPTC:Country-PrimaryLocationName", "XMP-photoshop:Country"],
+    # codigo ISO do pais — varias agencias rejeitam o envio sem ele
+    "country_code": ["IPTC:Country-PrimaryLocationCode", "XMP-iptcCore:CountryCode"],
     "copyright": ["IPTC:CopyrightNotice", "XMP-dc:Rights"],
     "credit": ["IPTC:Credit"],
     "source": ["IPTC:Source"],
@@ -153,9 +187,11 @@ FIELD_LABELS: Dict[str, str] = {
     "keywords": "Palavras-chave",
     "creator": "Criador",
     "creator_url": "Site/contato do criador",
+    "sublocation": "Local (dentro da cidade)",
     "city": "Cidade",
     "state": "Estado/Província",
     "country": "País",
+    "country_code": "Código do país (ISO)",
     "copyright": "Copyright",
     "credit": "Crédito",
     "source": "Fonte",
@@ -166,7 +202,8 @@ FIELD_LABELS: Dict[str, str] = {
 # lote (mesmo local/autor/condições) — os demais (texto único por foto)
 # começam desmarcados por padrão na tela de lote.
 BATCH_DEFAULT_CHECKED = {
-    "keywords", "creator", "creator_url", "city", "state", "country",
+    "keywords", "creator", "creator_url", "sublocation", "city", "state",
+    "country", "country_code",
     "copyright", "credit", "source", "usage_terms",
 }
 
@@ -224,9 +261,11 @@ def read_existing_fields(path: str) -> PhotoFields:
             "-IPTC:SpecialInstructions",
             "-IPTC:By-line",
             "-XMP-iptcCore:CreatorWorkURL",
+            "-IPTC:Sub-location",
             "-IPTC:City",
             "-IPTC:Province-State",
             "-IPTC:Country-PrimaryLocationName",
+            "-IPTC:Country-PrimaryLocationCode",
             "-IPTC:CopyrightNotice",
             "-IPTC:Credit",
             "-IPTC:Source",
@@ -234,6 +273,10 @@ def read_existing_fields(path: str) -> PhotoFields:
             "-Keywords",
             "-DateTimeOriginal",
             "-CreateDate",
+            # a data IPTC/XMP tem prioridade sobre a da câmera: se alguém
+            # já corrigiu a data à mão, é essa que deve voltar pra tela
+            "-IPTC:DateCreated",
+            "-XMP-photoshop:DateCreated",
             path,
         ]
     )
@@ -247,7 +290,8 @@ def read_existing_fields(path: str) -> PhotoFields:
     else:
         keywords = []
 
-    dt = _parse_exif_datetime(data.get("DateTimeOriginal") or data.get("CreateDate"))
+    dt = (_parse_exif_datetime(data.get("XMP:DateCreated") or data.get("DateCreated"))
+          or _parse_exif_datetime(data.get("DateTimeOriginal") or data.get("CreateDate")))
 
     return PhotoFields(
         caption=data.get("Caption-Abstract", "") or "",
@@ -256,9 +300,11 @@ def read_existing_fields(path: str) -> PhotoFields:
         keywords=keywords,
         creator=data.get("By-line", "") or "",
         creator_url=data.get("CreatorWorkURL", "") or "",
+        sublocation=data.get("Sub-location", "") or "",
         city=data.get("City", "") or "",
         state=data.get("Province-State", "") or "",
         country=data.get("Country-PrimaryLocationName", "") or "",
+        country_code=data.get("Country-PrimaryLocationCode", "") or "",
         copyright=data.get("CopyrightNotice", "") or "",
         credit=data.get("Credit", "") or "",
         source=data.get("Source", "") or "",
