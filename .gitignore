@@ -1,8 +1,8 @@
 # =====================================================================
 # DADOS DE USUÁRIO — nunca versionar
 # =====================================================================
-# O CineBrain OS guarda todo dado de usuário em
-#   ~/Library/Application Support/CineBrain OS/
+# O Metadados 81 guarda todo dado de usuário em
+#   ~/Library/Application Support/Metadados 81/
 # ou seja, FORA do repositório por construção. As regras abaixo são a
 # segunda linha de defesa: pegam cópias, exports e testes que acabem
 # parando dentro da pasta do projeto por engano.
