@@ -127,8 +127,41 @@ class MetadataTab(ttk.Frame):
         profile_combo.pack(side="left")
         profile_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_profile_change())
 
-        body = ttk.Frame(self, padding=10)
-        body.pack(fill="both", expand=True)
+        # AÇÕES PRIMEIRO, presas ao rodapé da janela.
+        # Precisam ser empacotadas ANTES da área rolável: o pack do Tk dá
+        # o espaço restante a quem vem depois, então uma barra criada
+        # depois de um `expand=True` fica espremida a quase-zero.
+        # E fora da rolagem, para que Salvar não desapareça ao rolar.
+        acoes = ttk.Frame(self, padding=(10, 8))
+        acoes.pack(side="bottom", fill="x")
+        self.keep_backup_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            acoes, text="Manter cópia de segurança (_original)",
+            variable=self.keep_backup_var,
+        ).pack(side="left")
+        ttk.Button(acoes, text="Processar em lote...",
+                   command=self.on_open_batch).pack(side="right", padx=(0, 8))
+        ttk.Button(acoes, text="Salvar metadados", style="Neon.TButton",
+                   command=self.on_save).pack(side="right")
+        self.status_label = ttk.Label(acoes, text="", foreground=theme.SUCCESS)
+        self.status_label.pack(side="left", padx=(16, 0))
+
+        # ÁREA ROLÁVEL — o formulário cresceu além da altura da janela com
+        # os campos de banco de imagens e o redimensionador, e sem isto o
+        # conteúdo de baixo ficava inalcançável.
+        holder = ttk.Frame(self)
+        holder.pack(fill="both", expand=True)
+        canvas = tk.Canvas(holder, highlightthickness=0)
+        vbar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        body = ttk.Frame(canvas, padding=10)
+        body.bind("<Configure>",
+                  lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=body, anchor="nw")
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+        self._form_canvas = canvas
+        self._form_body = body
 
         # coluna esquerda: miniatura + dados só-leitura da câmera
         left = ttk.Frame(body, width=THUMB_MAX)
@@ -321,15 +354,9 @@ class MetadataTab(ttk.Frame):
         )
         self.custom_editor.pack(fill="x", pady=(12, 0))
 
-        bottom = ttk.Frame(right)
-        bottom.pack(fill="x", pady=(20, 0))
-        self.keep_backup_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            bottom, text="Manter cópia de segurança (_original)", variable=self.keep_backup_var
-        ).pack(side="left")
-        ttk.Button(bottom, text="Processar em lote...", command=self.on_open_batch).pack(side="right", padx=(0, 8))
-        ttk.Button(bottom, text="Salvar metadados", style="Neon.TButton",
-                   command=self.on_save).pack(side="right")
+        # roda do mouse em qualquer ponto do formulário, com a convenção
+        # de cada sistema operacional
+        bind_mousewheel(canvas, body)
 
         # ------------------------------------ área de transferência
         # O gesto que isto serve: você acabou de etiquetar uma foto e a
@@ -358,8 +385,6 @@ class MetadataTab(ttk.Frame):
                    command=self.on_copy_from_file).pack(side="left")
         self._refresh_clipboard_label()
 
-        self.status_label = ttk.Label(right, text="", foreground=theme.SUCCESS)
-        self.status_label.pack(anchor="w", pady=(10, 0))
 
         if not DND_AVAILABLE:
             ttk.Label(
@@ -398,6 +423,9 @@ class MetadataTab(ttk.Frame):
         return prefs
 
     def _on_profile_change(self):
+        # o limite de tags muda com o perfil; o contador precisa
+        # acompanhar em vez de mostrar o número do perfil anterior
+        self.after(1, self._update_keywords_counter)
         label = self.profile_var.get()
         self.active_profile_key = self._profile_keys_by_label.get(label, DEFAULT_PROFILE)
         profile = get_profile(self.active_profile_key)
@@ -692,18 +720,29 @@ class MetadataTab(ttk.Frame):
             var.set(rotulo if rotulo else next(iter(mapa)))
 
     def _update_keywords_counter(self, _event=None):
-        """Conta as tags e avisa ao passar do limite das agências."""
+        """Conta as tags contra o limite do PERFIL ATIVO.
+
+        Um número fixo aqui mentiria: Adobe aceita 49 e Getty 50, e o
+        perfil "sem restrições" não tem limite nenhum."""
         n = len(PhotoFields.keywords_from_text(self.keywords_entry.get()))
-        if n > KEYWORD_SOFT_LIMIT:
-            menor = min(KEYWORD_LIMITS.values())
+        perfil = get_profile(self.active_profile_key)
+        maximo = perfil.get("max_keywords")
+        minimo = perfil.get("min_keywords")
+
+        if maximo and n > maximo:
             self.keywords_counter.configure(
-                text="%d tags — acima do limite (%s aceita %d)"
-                     % (n, "Adobe Stock", KEYWORD_LIMITS["Adobe Stock"]),
+                text="%d tags — acima do limite de %d" % (n, maximo),
                 style="Warning.TLabel")
+        elif minimo and 0 < n < minimo:
+            self.keywords_counter.configure(
+                text="%d tag(s) — o perfil recomenda ao menos %d" % (n, minimo),
+                style="Warning.TLabel")
+        elif maximo:
+            self.keywords_counter.configure(
+                text="%d de %d tags" % (n, maximo), style="Dim.TLabel")
         else:
             self.keywords_counter.configure(
-                text="%d tag(s) · limite %d" % (n, KEYWORD_SOFT_LIMIT),
-                style="Dim.TLabel")
+                text="%d tag(s)" % n, style="Dim.TLabel")
 
     def _set_date_entry(self, valor):
         self.date_entry.delete(0, "end")

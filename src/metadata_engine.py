@@ -297,12 +297,50 @@ VALIDATION_PROFILES: Dict[str, dict] = {
         "min_edge": None,
         "required": set(),
     },
+    # ------------------------------------------------ perfis de agência
+    # Cada agência tem suas próprias regras, e descobri-las na rejeição
+    # custa tempo. Os limites abaixo são os praticados hoje; se uma
+    # agência mudar, é uma linha aqui.
+    "adobe_stock": {
+        "label": "Adobe Stock",
+        "caption_max_len": 200,
+        "forbidden_chars": [],
+        "min_edge": 1732,          # ~4 MP no lado menor de um 4:3
+        "max_keywords": 49,
+        "min_keywords": 5,
+        "required": {"caption", "keywords", "creator", "digital_source"},
+    },
+    "shutterstock": {
+        "label": "Shutterstock",
+        "caption_max_len": 200,
+        "forbidden_chars": [],
+        "min_edge": 1732,
+        "max_keywords": 50,
+        "min_keywords": 7,
+        "required": {"caption", "keywords", "creator", "digital_source"},
+    },
+    "getty": {
+        "label": "Getty / iStock",
+        "caption_max_len": 250,
+        "forbidden_chars": [],
+        "min_edge": 2000,
+        "max_keywords": 50,
+        "min_keywords": 10,
+        "required": {"caption", "keywords", "creator", "object_name",
+                     "digital_source", "model_release"},
+    },
 }
 DEFAULT_PROFILE = "padrao"
 
 
 def list_profiles() -> List[tuple]:
     return [(key, cfg["label"]) for key, cfg in VALIDATION_PROFILES.items()]
+
+
+def profile_value(profile: dict, chave: str, padrao=None):
+    """Lê uma regra do perfil sem quebrar nos perfis que não a definem —
+    só os de agência têm limite de palavras-chave, por exemplo."""
+    return profile.get(chave, padrao)
 
 
 def get_profile(profile_key: str) -> dict:
@@ -464,6 +502,35 @@ def validate(fields: PhotoFields, shorter_edge: Optional[int], profile_key: str 
 
     if "keywords" in required and not fields.keywords:
         issues.append("Nenhuma palavra-chave preenchida.")
+
+    # Quantidade de palavras-chave: só os perfis de agência definem
+    # limite. Passar do máximo trunca ou reprova o envio; ficar abaixo do
+    # mínimo faz a foto quase não aparecer na busca.
+    quantas = len(fields.keywords or [])
+    maximo = profile_value(profile, "max_keywords")
+    minimo = profile_value(profile, "min_keywords")
+    if maximo and quantas > maximo:
+        issues.append(
+            "%d palavras-chave — o perfil aceita no máximo %d. As excedentes "
+            "podem ser cortadas no envio." % (quantas, maximo))
+    if minimo and 0 < quantas < minimo:
+        issues.append(
+            "Só %d palavra(s)-chave — o perfil recomenda ao menos %d, senão a "
+            "foto quase não aparece na busca." % (quantas, minimo))
+
+    # Campos que as agências passaram a exigir
+    if "digital_source" in required and not (fields.digital_source or "").strip():
+        issues.append(
+            "Origem digital não declarada. Agências recusam envio sem dizer se "
+            "a imagem foi gerada ou alterada por IA.")
+    if "object_name" in required and not (fields.object_name or "").strip():
+        issues.append("Título de venda não preenchido.")
+    if "model_release" in required and not (fields.model_release or "").strip():
+        issues.append(
+            "Liberação de modelo não declarada. Foto com pessoa reconhecível "
+            "sem status é recusada.")
+    if "alt_text" in required and not (fields.alt_text or "").strip():
+        issues.append("Texto alternativo de acessibilidade não preenchido.")
 
     if "creator" in required and not (fields.creator or "").strip():
         issues.append("Criador (fotógrafo/autor) não preenchido.")
