@@ -79,6 +79,9 @@ class MetadataTab(ttk.Frame):
         self.clipboard = ce.Clipboard()
         self.clipboard.load()
         self.current_shorter_edge = None
+        # O que dos campos personalizados já está gravado NESTA foto.
+        # Sem isso, uma linha já salva era contada como alteração pendente.
+        self._custom_salvos = {}
         self.thumb_imgtk = None  # precisa manter referência
 
         self._profile_labels = dict(list_profiles())
@@ -519,6 +522,7 @@ class MetadataTab(ttk.Frame):
         self._update_side_labels(camera_dt, shorter_edge, gps)
         self._load_thumbnail(path)
         self.custom_editor.clear()  # campos avançados são específicos de cada gravação
+        self._custom_salvos = {}
         self.status_label.configure(text="")
 
     def _fill_form(self, fields: PhotoFields):
@@ -677,7 +681,10 @@ class MetadataTab(ttk.Frame):
         try:
             no_arquivo = read_existing_fields(self.current_path)
         except Exception:
-            return False
+            # Nao da pra comparar. Falhar pro lado seguro: assumir que ha
+            # algo por salvar, porque o custo de perguntar a toa e um
+            # clique e o custo de errar e o metadado do usuario no lixo.
+            return True
         na_tela = self._collect_fields()
         for chave in ALL_FIELD_KEYS:
             atual = getattr(na_tela, chave, None)
@@ -687,7 +694,10 @@ class MetadataTab(ttk.Frame):
                     return True
             elif (atual or "").strip() != (gravado or "").strip():
                 return True
-        return bool(self.custom_editor.collect())
+        # Campo personalizado nao vem do arquivo lido, entao nao da pra
+        # comparar: so conta como alteracao se ainda nao foi gravado nesta
+        # foto (o que on_save registra em _custom_salvos).
+        return self.custom_editor.collect() != self._custom_salvos
 
     def _ask_metadata_choice(self):
         """Pergunta o que fazer com os metadados ainda não salvos.
@@ -866,6 +876,13 @@ class MetadataTab(ttk.Frame):
                 return datetime.strptime(texto, formato)
             except ValueError:
                 continue
+        # Antes isso voltava None calado e a data da camera prevalecia: o
+        # usuario saia achando que tinha gravado a data que digitou.
+        messagebox.showwarning(
+            "Data não reconhecida",
+            f"Não consegui entender \"{texto}\".\n\n"
+            "Use dd/mm/aaaa ou aaaa-mm-dd (a hora é opcional).\n"
+            "Vou manter a data original da câmera.")
         return None
 
     def _render_fileinfo(self, secoes):
@@ -1007,6 +1024,10 @@ class MetadataTab(ttk.Frame):
             text="Metadados copiados. Abra outra foto e clique em Colar aqui.",
             foreground=theme.SUCCESS)
 
+    def _reset_custom_rows(self):
+        """Zera os campos personalizados antes de repovoar a tela."""
+        self.custom_editor.clear()
+
     def on_paste_metadata(self):
         if not self.current_path:
             messagebox.showinfo(
@@ -1020,7 +1041,11 @@ class MetadataTab(ttk.Frame):
             return
         campos = self.clipboard.paste_onto(self._collect_fields())
         self._fill_form_full(campos)
-        for tag, valor in self.clipboard.custom.items():
+        # Repovoa do zero: colar duas vezes duplicava as linhas.
+        ja_na_tela = dict(self.custom_editor.collect())
+        ja_na_tela.update(self.clipboard.custom)
+        self._reset_custom_rows()
+        for tag, valor in ja_na_tela.items():
             self.custom_editor.add_row(tag, valor)
         self.status_label.configure(
             text="Metadados colados. Confira antes de salvar — a foto ainda "
@@ -1109,6 +1134,7 @@ class MetadataTab(ttk.Frame):
             messagebox.showerror("Erro ao salvar", str(e))
             return
 
+        self._custom_salvos = dict(custom_fields)
         save_prefs(self._current_sticky_prefs())
         self.status_label.configure(text="Metadados salvos com sucesso.", foreground=theme.SUCCESS)
         messagebox.showinfo("Salvo", "Metadados gravados no arquivo com sucesso.")
@@ -1119,9 +1145,39 @@ class MetadataTab(ttk.Frame):
 
 BATCH_FIELD_ORDER = [
     "caption", "headline", "instructions", "keywords",
-    "creator", "creator_url", "city", "state", "country",
+    "creator", "creator_url",
+    "sublocation", "city", "state", "country", "country_code",
     "copyright", "credit", "source", "usage_terms",
+    "object_name",
+    "digital_source", "model_release", "property_release",
 ]
+
+# Escolhas fechadas: no lote viram combo em vez de caixa de texto.
+BATCH_COMBO_FIELDS = {
+    "digital_source": DIGITAL_SOURCES,
+    "model_release": RELEASE_STATUSES,
+    "property_release": PROPERTY_RELEASE_STATUSES,
+}
+
+# Texto alternativo e descrição estendida descrevem *aquela* imagem
+# especificamente. Aplicar o mesmo texto a um lote inteiro produziria
+# acessibilidade falsa, então eles ficam de fora do lote de propósito.
+
+
+class _ComboValue:
+    """Combo de escolha fechada com a mesma interface de um Entry: .get()
+    devolve o valor que vai pro arquivo, não o rótulo mostrado na tela."""
+
+    def __init__(self, parent, opcoes):
+        rotulos = [rotulo for _valor, rotulo in opcoes]
+        self._mapa = {rotulo: valor for valor, rotulo in opcoes}
+        self.var = tk.StringVar(value=rotulos[0])
+        self.combo = ttk.Combobox(
+            parent, textvariable=self.var, state="readonly", values=rotulos
+        )
+
+    def get(self) -> str:
+        return self._mapa.get(self.var.get(), "")
 
 
 class BatchWindow(tk.Toplevel):
@@ -1220,69 +1276,18 @@ class BatchWindow(tk.Toplevel):
             self.apply_vars[key] = var
             ttk.Checkbutton(row, variable=var, text="aplicar").pack(side="left")
             ttk.Label(row, text=FIELD_LABELS[key] + ":", width=24).pack(side="left")
-            entry = ttk.Entry(row)
-            entry.pack(side="left", fill="x", expand=True)
-            if key in STICKY_FIELD_KEYS and prefs.get(key):
-                entry.insert(0, prefs[key])
-            self.value_widgets[key] = entry
+            if key in BATCH_COMBO_FIELDS:
+                opcoes = BATCH_COMBO_FIELDS[key]
+                widget = _ComboValue(row, opcoes)
+                widget.combo.pack(side="left", fill="x", expand=True)
+            else:
+                widget = ttk.Entry(row)
+                widget.pack(side="left", fill="x", expand=True)
+                if key in STICKY_FIELD_KEYS and prefs.get(key):
+                    widget.insert(0, prefs[key])
+            self.value_widgets[key] = widget
 
         ttk.Separator(form).pack(fill="x", pady=10)
-        # ------------------------------------------- banco de imagens
-        ttk.Separator(right).pack(fill="x", pady=(14, 0))
-        ttk.Label(right, text="Banco de imagens", style="Section.TLabel").pack(anchor="w", pady=(10, 0))
-        ttk.Label(
-            right,
-            text="Campos que as agências passaram a exigir. Sem a declaração de "
-                 "origem, envios com IA são recusados; sem status de liberação, "
-                 "foto com pessoa reconhecível também.",
-            style="Dim.TLabel", wraplength=640, justify="left",
-        ).pack(anchor="w", pady=(0, 6))
-
-        ttk.Label(right, text="Título de venda (curto — é o que aparece na busca):").pack(anchor="w")
-        self.object_name_entry = ttk.Entry(right)
-        self.object_name_entry.pack(fill="x")
-
-        ttk.Label(right, text="Texto alternativo (acessibilidade — descreva a imagem em uma frase):").pack(anchor="w", pady=(8, 0))
-        self.alt_text_entry = ttk.Entry(right)
-        self.alt_text_entry.pack(fill="x")
-
-        ttk.Label(right, text="Descrição estendida (acessibilidade — opcional):").pack(anchor="w", pady=(8, 0))
-        self.ext_descr_text = tk.Text(right, height=2, wrap="word")
-        theme.style_text_card(self.ext_descr_text)
-        self.ext_descr_text.pack(fill="x")
-
-        origem_frame = ttk.Frame(right)
-        origem_frame.pack(fill="x", pady=(8, 0))
-        col_a = ttk.Frame(origem_frame)
-        col_a.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(col_a, text="Origem digital (declaração de IA):").pack(anchor="w")
-        self._digital_labels = [rot for _iri, rot in DIGITAL_SOURCES]
-        self._digital_map = {rot: iri for iri, rot in DIGITAL_SOURCES}
-        self.digital_source_var = tk.StringVar(value=self._digital_labels[0])
-        ttk.Combobox(col_a, textvariable=self.digital_source_var, state="readonly",
-                     values=self._digital_labels).pack(fill="x")
-
-        rel_frame = ttk.Frame(right)
-        rel_frame.pack(fill="x", pady=(8, 0))
-        col_b = ttk.Frame(rel_frame)
-        col_b.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(col_b, text="Liberação de modelo:").pack(anchor="w")
-        self._model_labels = [rot for _v, rot in RELEASE_STATUSES]
-        self._model_map = {rot: v for v, rot in RELEASE_STATUSES}
-        self.model_release_var = tk.StringVar(value=self._model_labels[0])
-        ttk.Combobox(col_b, textvariable=self.model_release_var, state="readonly",
-                     values=self._model_labels).pack(fill="x")
-        col_c = ttk.Frame(rel_frame)
-        col_c.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ttk.Label(col_c, text="Liberação de propriedade:").pack(anchor="w")
-        self._prop_labels = [rot for _v, rot in PROPERTY_RELEASE_STATUSES]
-        self._prop_map = {rot: v for v, rot in PROPERTY_RELEASE_STATUSES}
-        self.property_release_var = tk.StringVar(value=self._prop_labels[0])
-        ttk.Combobox(col_c, textvariable=self.property_release_var, state="readonly",
-                     values=self._prop_labels).pack(fill="x")
-
-        ttk.Separator(right).pack(fill="x", pady=(14, 0))
-        self._build_resize_section(right)
 
         self.custom_editor = CustomFieldsEditor(
             form,
@@ -1342,21 +1347,29 @@ class BatchWindow(tk.Toplevel):
 
     # ---------------------------------------------------------- processamento
     def _build_batch_fields(self) -> PhotoFields:
-        keywords = PhotoFields.keywords_from_text(self.value_widgets["keywords"].get())
+        def v(key):
+            return self.value_widgets[key].get().strip()
+
         return PhotoFields(
-            caption=self.value_widgets["caption"].get().strip(),
-            headline=self.value_widgets["headline"].get().strip(),
-            instructions=self.value_widgets["instructions"].get().strip(),
-            keywords=keywords,
-            creator=self.value_widgets["creator"].get().strip(),
-            creator_url=self.value_widgets["creator_url"].get().strip(),
-            city=self.value_widgets["city"].get().strip(),
-            state=self.value_widgets["state"].get().strip(),
-            country=self.value_widgets["country"].get().strip(),
-            copyright=self.value_widgets["copyright"].get().strip(),
-            credit=self.value_widgets["credit"].get().strip(),
-            source=self.value_widgets["source"].get().strip(),
-            usage_terms=self.value_widgets["usage_terms"].get().strip(),
+            caption=v("caption"),
+            headline=v("headline"),
+            instructions=v("instructions"),
+            keywords=PhotoFields.keywords_from_text(v("keywords")),
+            creator=v("creator"),
+            creator_url=v("creator_url"),
+            sublocation=v("sublocation"),
+            city=v("city"),
+            state=v("state"),
+            country=v("country"),
+            country_code=v("country_code"),
+            copyright=v("copyright"),
+            credit=v("credit"),
+            source=v("source"),
+            usage_terms=v("usage_terms"),
+            object_name=v("object_name"),
+            digital_source=v("digital_source"),
+            model_release=v("model_release"),
+            property_release=v("property_release"),
         )
 
     def _preflight_issues(self, fields: PhotoFields, apply_fields: set) -> list:

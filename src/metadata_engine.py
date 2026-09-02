@@ -118,6 +118,12 @@ def check_exiftool() -> bool:
     return _find_exiftool() is not None
 
 
+# Teto de tempo pra qualquer chamada ao ExifTool. Sem ele, um processo
+# travado (arquivo em volume de rede que caiu, por exemplo) congela a
+# janela inteira, porque a chamada acontece na thread da interface.
+EXIFTOOL_TIMEOUT = 60
+
+
 def _run_exiftool(args: List[str]) -> str:
     exiftool_bin = _find_exiftool()
     if not exiftool_bin:
@@ -125,10 +131,17 @@ def _run_exiftool(args: List[str]) -> str:
     # nao assume que o binario tem bit de execucao: em macOS/Linux o
     # ExifTool e um script Perl e volumes de nuvem descartam o bit
     comando = platform_utils.exiftool_command(exiftool_bin)
-    result = subprocess.run(
-        comando + args, capture_output=True, text=True, encoding="utf-8",
-        **platform_utils.subprocess_flags()
-    )
+    try:
+        result = subprocess.run(
+            comando + args, capture_output=True, text=True, encoding="utf-8",
+            timeout=EXIFTOOL_TIMEOUT, **platform_utils.subprocess_flags()
+        )
+    except subprocess.TimeoutExpired:
+        raise MetadataWriteError(
+            f"O ExifTool não respondeu em {EXIFTOOL_TIMEOUT} segundos e foi "
+            "interrompido. Se a foto está num volume de rede ou de nuvem, "
+            "copie ela pro disco local e tente de novo."
+        )
     if result.returncode != 0:
         raise MetadataWriteError(result.stderr.strip() or "Erro desconhecido do ExifTool.")
     return result.stdout

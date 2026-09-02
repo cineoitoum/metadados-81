@@ -65,6 +65,11 @@ def fit_size(largura_original: int, altura_original: int,
     """
     if largura_original <= 0 or altura_original <= 0:
         raise ResizeError("Tamanho original inválido.")
+    for rotulo, valor in (("largura", largura), ("altura", altura)):
+        if valor is not None and valor <= 0:
+            raise ResizeError(
+                f"A {rotulo} precisa ser maior que zero (recebi {valor})."
+            )
 
     proporcao = largura_original / float(altura_original)
 
@@ -159,6 +164,14 @@ def resize(path: str, largura: Optional[int] = None, altura: Optional[int] = Non
     # autor e sem direitos, o que é o oposto do que este app faz.
     aviso = _copy_metadata(path, temporario)
 
+    # Ampliar um JPEG não cria detalhe nenhum: só inventa pixel e engorda
+    # o arquivo. O app não impede, mas precisa dizer.
+    if nova_l > largura_original or nova_a > altura_original:
+        ampliou = (f"A imagem foi AMPLIADA de {largura_original}x{altura_original} "
+                   f"para {nova_l}x{nova_a}. Ampliar não recupera detalhe — "
+                   "o resultado fica mais macio que o original.")
+        aviso = (aviso + " " + ampliou).strip() if aviso else ampliou
+
     try:
         os.replace(temporario, saida)
     except OSError as e:
@@ -189,7 +202,9 @@ def _copy_metadata(origem: str, destino: str) -> str:
             "-all:all",
             # a dimensão tem de ser a NOVA, não a copiada do original
             "-XResolution", "-YResolution", "-ResolutionUnit",
-            "--Orientation",
+            # A orientacao NAO e excluida: o Pillow grava os pixels ja na
+            # posicao final, mas nao aplica o EXIF ao redimensionar, entao
+            # descartar a tag fazia toda foto vertical sair deitada.
             "-overwrite_original",
             destino,
         ]
