@@ -319,26 +319,31 @@ VALIDATION_PROFILES: Dict[str, dict] = {
         "min_keywords": 7,
         "required": {"caption", "keywords", "creator", "digital_source"},
     },
-    # PULSAR IMAGENS — banco de imagens brasileiro, acervo documental e
-    # fortemente geografico: as fotos sao catalogadas por municipio e
-    # estado, e a legenda descreve a cena com lugar e contexto.
+    # PULSAR IMAGENS — regras oficiais de envio do colaborador.
     #
-    # Por isso este perfil exige TODOS os campos de localizacao, o que
-    # nenhum dos outros faz — e permite legenda longa, porque legenda
-    # editorial brasileira costuma trazer o contexto inteiro.
+    # Acervo documental e geografico: as fotos sao catalogadas por
+    # municipio e estado, e por isso os tres campos de local sao
+    # obrigatorios (para fotos fora do Brasil, so Cidade e Pais — o
+    # aviso de Estado pode ser ignorado nesse caso).
     #
-    # ATENCAO: os NUMEROS abaixo (limites de palavra-chave e tamanho
-    # minimo) sao conservadores, nao confirmados com a agencia. Ajuste-os
-    # aqui quando tiver a especificacao oficial deles — sao tres linhas.
+    # A legenda tem regra dura: 100 caracteres, sem aspas, virgula ou
+    # parenteses. E quando ha pessoa com Licenca de Uso de Imagem, a
+    # legenda precisa citar "LUI: Nome" com o mesmo nome do arquivo da
+    # licenca — nunca codigo numerico.
     "pulsar": {
         "label": "Pulsar Imagens",
-        "caption_max_len": 500,
-        "forbidden_chars": [],
-        "min_edge": 2000,
-        "max_keywords": 50,
-        "min_keywords": 8,
+        "caption_max_len": 100,
+        "forbidden_chars": ['"', "'", ",", "(", ")"],
+        "min_edge": 4000,
         "required": {"caption", "keywords", "creator",
                      "city", "state", "country"},
+        # --- regras tecnicas, conferidas contra o proprio arquivo ---
+        "color_profile": "adobe rgb",
+        "color_profile_label": "Adobe RGB",
+        "max_iso": 800,
+        "max_iso_moderna": 6400,   # Nikon Z / Canon R, quando o tema exigir
+        "min_quality": 95,         # qualidade 12 do Photoshop / 100% do Lightroom
+        "exige_lui_na_legenda": True,
     },
     "getty": {
         "label": "Getty / iStock",
@@ -502,9 +507,16 @@ def list_image_files(folder: str) -> List[str]:
 
 # --------------------------------------------------------------- validação
 
-def validate(fields: PhotoFields, shorter_edge: Optional[int], profile_key: str = DEFAULT_PROFILE) -> List[str]:
+def validate(fields: PhotoFields, shorter_edge: Optional[int],
+             profile_key: str = DEFAULT_PROFILE,
+             tecnico: Optional[dict] = None) -> List[str]:
     """Retorna lista de problemas encontrados, de acordo com o perfil de
-    validação ativo. Lista vazia = tudo certo."""
+    validação ativo. Lista vazia = tudo certo.
+
+    `tecnico` traz o que se lê do próprio arquivo e não do formulário —
+    ISO, perfil de cor e qualidade de gravação. Só os perfis de agência
+    que definem essas regras o usam; os demais ignoram."""
+    tecnico = tecnico or {}
     profile = get_profile(profile_key)
     required = profile["required"]
     issues = []
@@ -540,6 +552,59 @@ def validate(fields: PhotoFields, shorter_edge: Optional[int], profile_key: str 
             "foto quase não aparece na busca." % (quantas, minimo))
 
     # Campos que as agências passaram a exigir
+    # --- regras técnicas, conferidas contra o arquivo ---
+
+    perfil_cor = profile_value(profile, "color_profile")
+    if perfil_cor:
+        atual = str(tecnico.get("color_profile") or "").lower()
+        rotulo_cor = profile_value(profile, "color_profile_label", perfil_cor.upper())
+        if not atual:
+            issues.append(
+                "Não consegui ler o perfil de cor do arquivo — o perfil ativo "
+                "exige %s." % rotulo_cor)
+        elif perfil_cor not in atual:
+            issues.append(
+                "Perfil de cor é \"%s\" — o perfil ativo exige %s."
+                % (tecnico.get("color_profile"), rotulo_cor))
+
+    teto_iso = profile_value(profile, "max_iso")
+    if teto_iso and tecnico.get("iso"):
+        try:
+            iso = int(float(tecnico["iso"]))
+        except (TypeError, ValueError):
+            iso = None
+        teto_moderno = profile_value(profile, "max_iso_moderna")
+        if iso and iso > teto_iso:
+            if teto_moderno and iso <= teto_moderno:
+                issues.append(
+                    "ISO %d acima do teto de %d. Só é aceito até %d em corpos "
+                    "recentes (Nikon Z, Canon R) e quando o tema justificar."
+                    % (iso, teto_iso, teto_moderno))
+            else:
+                issues.append("ISO %d acima do máximo de %d aceito pelo perfil."
+                              % (iso, teto_iso))
+
+    qualidade_min = profile_value(profile, "min_quality")
+    if qualidade_min and tecnico.get("quality"):
+        try:
+            q = int(tecnico["quality"])
+        except (TypeError, ValueError):
+            q = None
+        if q and q < qualidade_min:
+            issues.append(
+                "Qualidade de gravação estimada em %d — o perfil pede o "
+                "equivalente a 12 no Photoshop ou 100%% no Lightroom." % q)
+
+    # Legenda precisa citar a LUI quando existe liberação de modelo
+    if profile_value(profile, "exige_lui_na_legenda"):
+        tem_liberacao = (fields.model_release or "").strip() not in (
+            "", "Not Applicable", "None")
+        if tem_liberacao and "lui:" not in caption.lower():
+            issues.append(
+                "Há liberação de modelo declarada, mas a legenda não cita a "
+                "LUI. Acrescente \" - LUI: Nome\", com o mesmo nome do arquivo "
+                "da licença.")
+
     if "digital_source" in required and not (fields.digital_source or "").strip():
         issues.append(
             "Origem digital não declarada. Agências recusam envio sem dizer se "

@@ -75,6 +75,7 @@ class MetadataTab(ttk.Frame):
 
         self.current_path = None
         self.current_fields = PhotoFields()
+        self._fileinfo_cache = []
         self.clipboard = ce.Clipboard()
         self.clipboard.load()
         self.current_shorter_edge = None
@@ -892,11 +893,38 @@ class MetadataTab(ttk.Frame):
                 ttk.Label(linha, text=valor, wraplength=THUMB_MAX - 130,
                           justify="left").pack(side="left", fill="x", expand=True)
 
+    def _dados_tecnicos(self):
+        """O que se lê do ARQUIVO e não do formulário: perfil de cor, ISO
+        e qualidade de gravação. Perfis de agência checam essas regras —
+        a Pulsar exige Adobe RGB, teto de ISO e gravação em qualidade
+        máxima. Os demais perfis simplesmente ignoram."""
+        if not self.current_path:
+            return {}
+        dados = {}
+        try:
+            dados["quality"] = fi.estimate_jpeg_quality(self.current_path)
+        except Exception:
+            pass
+        try:
+            for secao, linhas in (self._fileinfo_cache or []):
+                for rotulo, valor in linhas:
+                    if rotulo == "Perfil ICC":
+                        dados["color_profile"] = valor
+                    elif rotulo == "Espaço de cor" and "color_profile" not in dados:
+                        dados["color_profile"] = valor
+                    elif rotulo == "ISO":
+                        dados["iso"] = valor
+        except Exception:
+            pass
+        return dados
+
     def _refresh_fileinfo(self):
         try:
             secoes = fi.describe(self.current_path) if self.current_path else []
         except Exception:
             secoes = []
+        # guardado para a validação não precisar reler o arquivo
+        self._fileinfo_cache = secoes
         self._render_fileinfo(secoes)
 
     def _update_side_labels(self, camera_dt, shorter_edge, gps):
@@ -1066,7 +1094,8 @@ class MetadataTab(ttk.Frame):
             return
 
         fields = self._collect_fields()
-        issues = validate(fields, self.current_shorter_edge, self.active_profile_key)
+        issues = validate(fields, self.current_shorter_edge,
+                          self.active_profile_key, self._dados_tecnicos())
 
         if issues:
             proceed = show_issues_dialog(self, "Itens pendentes", issues)
