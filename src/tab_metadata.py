@@ -606,10 +606,15 @@ class MetadataTab(ttk.Frame):
 
         acoes = ttk.Frame(parent)
         acoes.pack(fill="x", pady=(6, 0))
-        ttk.Button(acoes, text="Redimensionar", command=self.on_resize).pack(side="left")
+        # Os atalhos de tamanho só PREENCHEM o campo; quem aplica é o
+        # botão de ação. Ele fica em steel para ter peso próprio sem
+        # competir com o Salvar metadados, que é a ação da tela.
+        ttk.Label(acoes, text="atalhos:", style="Dim.TLabel").pack(side="left", padx=(0, 6))
         for rotulo, largura in (("2000px", 2000), ("3000px", 3000), ("4000px", 4000)):
             ttk.Button(acoes, text=rotulo, width=7,
-                       command=lambda w=largura: self._preset_resize(w)).pack(side="left", padx=(6, 0))
+                       command=lambda w=largura: self._preset_resize(w)).pack(side="left", padx=(0, 4))
+        ttk.Button(acoes, text="Aplicar redimensionamento", style="Steel.TButton",
+                   command=self.on_resize).pack(side="right")
 
         self.resize_label = ttk.Label(parent, text="", style="Dim.TLabel",
                                       wraplength=640, justify="left")
@@ -660,6 +665,75 @@ class MetadataTab(ttk.Frame):
         cadeado = "proporção travada" if self.keep_ratio_var.get() else "proporção livre"
         self.resize_label.configure(text="Original: %d × %d px · %s" % (tamanho[0], tamanho[1], cadeado))
 
+    def _form_differs_from_file(self):
+        """Há metadado digitado que ainda não está no arquivo?
+
+        Compara o formulário com o que está gravado. Importa aqui porque
+        o redimensionamento copia os metadados DO ARQUIVO — o que só
+        existe na tela seria perdido na cópia sem o usuário perceber."""
+        if not self.current_path:
+            return False
+        try:
+            no_arquivo = read_existing_fields(self.current_path)
+        except Exception:
+            return False
+        na_tela = self._collect_fields()
+        for chave in ALL_FIELD_KEYS:
+            atual = getattr(na_tela, chave, None)
+            gravado = getattr(no_arquivo, chave, None)
+            if chave == "keywords":
+                if list(atual or []) != list(gravado or []):
+                    return True
+            elif (atual or "").strip() != (gravado or "").strip():
+                return True
+        return bool(self.custom_editor.collect())
+
+    def _ask_metadata_choice(self):
+        """Pergunta o que fazer com os metadados ainda não salvos.
+
+        Diálogo próprio em vez de askyesnocancel: "Sim/Não/Cancelar" não
+        diz o que cada opção faz, e a escolha aqui altera o arquivo."""
+        janela = tk.Toplevel(self)
+        janela.title("Metadados não salvos")
+        janela.configure(bg=theme.BG_APP)
+        janela.transient(self)
+        janela.grab_set()
+        escolha = {"valor": None}
+
+        card = theme.card(janela, padding=16)
+        card.pack(fill="both", expand=True, padx=14, pady=14)
+        ttk.Label(card, text="Você preencheu metadados que ainda não foram salvos",
+                  style="CardTitle.TLabel", wraplength=430, justify="left").pack(anchor="w")
+        ttk.Label(
+            card,
+            text="O redimensionamento copia os metadados que estão gravados no "
+                 "arquivo. O que está só na tela se perderia.",
+            style="Card.TLabel", wraplength=430, justify="left",
+        ).pack(anchor="w", pady=(6, 12))
+
+        def responder(valor):
+            escolha["valor"] = valor
+            janela.destroy()
+
+        ttk.Button(card, text="Gravar os metadados e redimensionar",
+                   style="Card.TButton",
+                   command=lambda: responder("aplicar")).pack(fill="x")
+        ttk.Label(card, text="Salva o que você digitou e leva tudo para a imagem nova.",
+                  style="CardDim.TLabel", wraplength=430, justify="left").pack(anchor="w", pady=(2, 8))
+
+        ttk.Button(card, text="Redimensionar sem gravar",
+                   style="CardGhost.TButton",
+                   command=lambda: responder("ignorar")).pack(fill="x")
+        ttk.Label(card, text="A imagem nova leva só os metadados que já estavam no arquivo.",
+                  style="CardDim.TLabel", wraplength=430, justify="left").pack(anchor="w", pady=(2, 8))
+
+        ttk.Button(card, text="Cancelar", style="CardGhost.TButton",
+                   command=lambda: responder(None)).pack(fill="x")
+
+        janela.protocol("WM_DELETE_WINDOW", lambda: responder(None))
+        self.wait_window(janela)
+        return escolha["valor"]
+
     def on_resize(self):
         if not self.current_path:
             messagebox.showinfo("Nenhuma foto aberta", "Abra uma foto primeiro.")
@@ -677,12 +751,33 @@ class MetadataTab(ttk.Frame):
                                 "Informe a largura, a altura, ou as duas.")
             return
 
+        # Metadados digitados e não salvos se perderiam na cópia — o
+        # redimensionamento copia do ARQUIVO, não da tela.
+        gravar_antes = False
+        if self._form_differs_from_file():
+            escolha = self._ask_metadata_choice()
+            if escolha is None:
+                return
+            gravar_antes = (escolha == "aplicar")
+
         sobrescrever = bool(self.overwrite_var.get())
         if sobrescrever and not messagebox.askyesno(
             "Sobrescrever o original?",
             "Isto recodifica o arquivo original — não dá pra desfazer, e "
             "recodificar sempre perde alguma qualidade.\n\nContinuar?"):
             return
+
+        # grava ANTES de redimensionar: assim o -tagsFromFile do
+        # ExifTool já encontra os metadados novos no original
+        if gravar_antes:
+            try:
+                write_metadata(self.current_path, self._collect_fields(),
+                               keep_backup=self.keep_backup_var.get(),
+                               custom_fields=self.custom_editor.collect())
+                save_prefs(self._current_sticky_prefs())
+            except (ExifToolNotFound, MetadataWriteError) as e:
+                messagebox.showerror("Não consegui gravar os metadados", str(e))
+                return
 
         try:
             r = rz.resize(self.current_path, largura=largura, altura=altura,

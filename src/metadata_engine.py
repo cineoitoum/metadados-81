@@ -319,6 +319,27 @@ VALIDATION_PROFILES: Dict[str, dict] = {
         "min_keywords": 7,
         "required": {"caption", "keywords", "creator", "digital_source"},
     },
+    # PULSAR IMAGENS — banco de imagens brasileiro, acervo documental e
+    # fortemente geografico: as fotos sao catalogadas por municipio e
+    # estado, e a legenda descreve a cena com lugar e contexto.
+    #
+    # Por isso este perfil exige TODOS os campos de localizacao, o que
+    # nenhum dos outros faz — e permite legenda longa, porque legenda
+    # editorial brasileira costuma trazer o contexto inteiro.
+    #
+    # ATENCAO: os NUMEROS abaixo (limites de palavra-chave e tamanho
+    # minimo) sao conservadores, nao confirmados com a agencia. Ajuste-os
+    # aqui quando tiver a especificacao oficial deles — sao tres linhas.
+    "pulsar": {
+        "label": "Pulsar Imagens",
+        "caption_max_len": 500,
+        "forbidden_chars": [],
+        "min_edge": 2000,
+        "max_keywords": 50,
+        "min_keywords": 8,
+        "required": {"caption", "keywords", "creator",
+                     "city", "state", "country"},
+    },
     "getty": {
         "label": "Getty / iStock",
         "caption_max_len": 250,

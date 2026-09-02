@@ -74,6 +74,25 @@ echo "==> Teste de fumaça: o app abre?"
   || echo "    AVISO: o teste de fumaça falhou — abra o app à mão para ver o erro"
 echo
 
+echo "==> Teste de abertura pelo Finder"
+# O smoke-test roda o binario DIRETO. O usuario abre pelo Finder, que
+# manda AppleEvents — e foi exatamente ai que o argv_emulation derrubava
+# o app enquanto todos os testes passavam. Um teste que nao reproduz o
+# gesto do usuario nao cobre o defeito do usuario.
+open -a "$APP"
+sleep 6
+if pgrep -f "$APP_NOME" >/dev/null 2>&1; then
+  echo "    abriu pelo Finder e continua rodando"
+  pkill -f "$APP_NOME" 2>/dev/null || true
+else
+  echo "    ERRO: o app NAO sobreviveu ao ser aberto pelo Finder."
+  CRASH=$(ls -t "$HOME/Library/Logs/DiagnosticReports/$APP_NOME"*.ips 2>/dev/null | head -1)
+  [ -n "$CRASH" ] && echo "    relatorio de crash: $CRASH"
+  echo "    O DMG nao sera gerado."
+  exit 1
+fi
+echo
+
 echo "==> Montando o DMG"
 DMG_STAGE="$TRABALHO/dmg"
 mkdir -p "$DMG_STAGE"
