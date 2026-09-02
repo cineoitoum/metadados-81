@@ -21,8 +21,14 @@ from tkinter import filedialog, messagebox, ttk
 
 import clipboard_engine as ce
 import theme
+import resize_engine as rz
 from metadata_engine import (
     ALL_FIELD_KEYS,
+    DIGITAL_SOURCES,
+    KEYWORD_LIMITS,
+    KEYWORD_SOFT_LIMIT,
+    PROPERTY_RELEASE_STATUSES,
+    RELEASE_STATUSES,
     BATCH_DEFAULT_CHECKED,
     DEFAULT_PROFILE,
     ExifToolNotFound,
@@ -168,8 +174,15 @@ class MetadataTab(ttk.Frame):
         self.instructions_text = tk.Text(right, height=4, wrap="word")
         self.instructions_text.pack(fill="x")
 
-        ttk.Label(right, text="Palavras-chave / tags (separadas por vírgula):").pack(anchor="w", pady=(10, 0))
+        kw_head = ttk.Frame(right)
+        kw_head.pack(fill="x", pady=(10, 0))
+        ttk.Label(kw_head, text="Palavras-chave / tags (separadas por vírgula):").pack(side="left")
+        # Adobe aceita 49 e Shutterstock 50; passar disso trunca ou
+        # reprova o envio. Melhor saber aqui que na rejeição.
+        self.keywords_counter = ttk.Label(kw_head, text="", style="Dim.TLabel")
+        self.keywords_counter.pack(side="right")
         self.keywords_entry = ttk.Entry(right)
+        self.keywords_entry.bind("<KeyRelease>", self._update_keywords_counter)
         self.keywords_entry.pack(fill="x")
 
         creator_frame = ttk.Frame(right)
@@ -243,6 +256,63 @@ class MetadataTab(ttk.Frame):
         ttk.Label(usage_col, text="Termos de uso/Licença (opcional):").pack(anchor="w")
         self.usage_terms_entry = ttk.Entry(usage_col)
         self.usage_terms_entry.pack(fill="x")
+
+        # ------------------------------------------- banco de imagens
+        ttk.Separator(right).pack(fill="x", pady=(14, 0))
+        ttk.Label(right, text="Banco de imagens", style="Section.TLabel").pack(anchor="w", pady=(10, 0))
+        ttk.Label(
+            right,
+            text="Campos que as agências passaram a exigir. Sem a declaração de "
+                 "origem, envios com IA são recusados; sem status de liberação, "
+                 "foto com pessoa reconhecível também.",
+            style="Dim.TLabel", wraplength=640, justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+
+        ttk.Label(right, text="Título de venda (curto — é o que aparece na busca):").pack(anchor="w")
+        self.object_name_entry = ttk.Entry(right)
+        self.object_name_entry.pack(fill="x")
+
+        ttk.Label(right, text="Texto alternativo (acessibilidade — descreva a imagem em uma frase):").pack(anchor="w", pady=(8, 0))
+        self.alt_text_entry = ttk.Entry(right)
+        self.alt_text_entry.pack(fill="x")
+
+        ttk.Label(right, text="Descrição estendida (acessibilidade — opcional):").pack(anchor="w", pady=(8, 0))
+        self.ext_descr_text = tk.Text(right, height=2, wrap="word")
+        theme.style_text_card(self.ext_descr_text)
+        self.ext_descr_text.pack(fill="x")
+
+        origem_frame = ttk.Frame(right)
+        origem_frame.pack(fill="x", pady=(8, 0))
+        col_a = ttk.Frame(origem_frame)
+        col_a.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ttk.Label(col_a, text="Origem digital (declaração de IA):").pack(anchor="w")
+        self._digital_labels = [rot for _iri, rot in DIGITAL_SOURCES]
+        self._digital_map = {rot: iri for iri, rot in DIGITAL_SOURCES}
+        self.digital_source_var = tk.StringVar(value=self._digital_labels[0])
+        ttk.Combobox(col_a, textvariable=self.digital_source_var, state="readonly",
+                     values=self._digital_labels).pack(fill="x")
+
+        rel_frame = ttk.Frame(right)
+        rel_frame.pack(fill="x", pady=(8, 0))
+        col_b = ttk.Frame(rel_frame)
+        col_b.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ttk.Label(col_b, text="Liberação de modelo:").pack(anchor="w")
+        self._model_labels = [rot for _v, rot in RELEASE_STATUSES]
+        self._model_map = {rot: v for v, rot in RELEASE_STATUSES}
+        self.model_release_var = tk.StringVar(value=self._model_labels[0])
+        ttk.Combobox(col_b, textvariable=self.model_release_var, state="readonly",
+                     values=self._model_labels).pack(fill="x")
+        col_c = ttk.Frame(rel_frame)
+        col_c.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        ttk.Label(col_c, text="Liberação de propriedade:").pack(anchor="w")
+        self._prop_labels = [rot for _v, rot in PROPERTY_RELEASE_STATUSES]
+        self._prop_map = {rot: v for v, rot in PROPERTY_RELEASE_STATUSES}
+        self.property_release_var = tk.StringVar(value=self._prop_labels[0])
+        ttk.Combobox(col_c, textvariable=self.property_release_var, state="readonly",
+                     values=self._prop_labels).pack(fill="x")
+
+        ttk.Separator(right).pack(fill="x", pady=(14, 0))
+        self._build_resize_section(right)
 
         self.custom_editor = CustomFieldsEditor(
             right,
@@ -407,6 +477,7 @@ class MetadataTab(ttk.Frame):
         self._set_photo_fields_enabled(True)
         self._fill_form(existing)
         self._set_date_entry(existing.date_created)
+        self._update_resize_label()
         self._update_side_labels(camera_dt, shorter_edge, gps)
         self._load_thumbnail(path)
         self.custom_editor.clear()  # campos avançados são específicos de cada gravação
@@ -435,6 +506,204 @@ class MetadataTab(ttk.Frame):
             if value:
                 widgets[key].delete(0, "end")
                 widgets[key].insert(0, value)
+        self._fill_agency_fields(fields)
+        self._update_keywords_counter()
+
+    # ------------------------------------------ redimensionamento
+
+    def _build_resize_section(self, parent):
+        """Painel de redimensionamento.
+
+        É o único lugar do app que reescreve pixels — tudo o mais mexe só
+        nos metadados e deixa a imagem byte a byte idêntica. Por isso o
+        padrão é gravar uma CÓPIA: recodificar por cima do original é
+        irreversível."""
+        ttk.Label(parent, text="Redimensionar", style="Section.TLabel").pack(anchor="w", pady=(10, 0))
+        ttk.Label(
+            parent,
+            text="Recodifica a imagem — por isso grava uma cópia por padrão. Os "
+                 "metadados são copiados para o arquivo novo.",
+            style="Dim.TLabel", wraplength=640, justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+
+        linha = ttk.Frame(parent)
+        linha.pack(fill="x")
+
+        col_l = ttk.Frame(linha)
+        col_l.pack(side="left")
+        ttk.Label(col_l, text="Largura:").pack(anchor="w")
+        self.resize_w = ttk.Entry(col_l, width=8)
+        self.resize_w.pack()
+
+        # o cadeado: fechado mantém a proporção
+        self.keep_ratio_var = tk.BooleanVar(value=True)
+        col_lock = ttk.Frame(linha)
+        col_lock.pack(side="left", padx=8)
+        ttk.Label(col_lock, text=" ").pack(anchor="w")
+        self.lock_button = ttk.Button(col_lock, text="🔒", width=3,
+                                      command=self._toggle_ratio_lock)
+        self.lock_button.pack()
+
+        col_a = ttk.Frame(linha)
+        col_a.pack(side="left")
+        ttk.Label(col_a, text="Altura:").pack(anchor="w")
+        self.resize_h = ttk.Entry(col_a, width=8)
+        self.resize_h.pack()
+
+        col_q = ttk.Frame(linha)
+        col_q.pack(side="left", padx=(14, 0))
+        ttk.Label(col_q, text="Qualidade JPEG:").pack(anchor="w")
+        self.resize_q = ttk.Entry(col_q, width=5)
+        self.resize_q.insert(0, str(rz.DEFAULT_QUALITY))
+        self.resize_q.pack()
+
+        # com o cadeado fechado, digitar num campo calcula o outro
+        self.resize_w.bind("<KeyRelease>", lambda _e: self._sync_ratio("w"))
+        self.resize_h.bind("<KeyRelease>", lambda _e: self._sync_ratio("h"))
+
+        self.overwrite_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            parent, text="Sobrescrever o original (não dá pra desfazer)",
+            variable=self.overwrite_var,
+        ).pack(anchor="w", pady=(6, 0))
+
+        acoes = ttk.Frame(parent)
+        acoes.pack(fill="x", pady=(6, 0))
+        ttk.Button(acoes, text="Redimensionar", command=self.on_resize).pack(side="left")
+        for rotulo, largura in (("2000px", 2000), ("3000px", 3000), ("4000px", 4000)):
+            ttk.Button(acoes, text=rotulo, width=7,
+                       command=lambda w=largura: self._preset_resize(w)).pack(side="left", padx=(6, 0))
+
+        self.resize_label = ttk.Label(parent, text="", style="Dim.TLabel",
+                                      wraplength=640, justify="left")
+        self.resize_label.pack(anchor="w", pady=(4, 0))
+
+    def _toggle_ratio_lock(self):
+        self.keep_ratio_var.set(not self.keep_ratio_var.get())
+        self.lock_button.configure(text="🔒" if self.keep_ratio_var.get() else "🔓")
+        self._update_resize_label()
+
+    def _preset_resize(self, largura):
+        self.resize_w.delete(0, "end")
+        self.resize_w.insert(0, str(largura))
+        self._sync_ratio("w")
+
+    def _sync_ratio(self, origem):
+        """Com o cadeado fechado, o lado digitado calcula o outro."""
+        if not self.keep_ratio_var.get() or not self.current_path:
+            self._update_resize_label()
+            return
+        tamanho = rz.get_size(self.current_path)
+        if not tamanho:
+            return
+        lo, ao = tamanho
+        try:
+            if origem == "w":
+                valor = int(self.resize_w.get().strip() or 0)
+                if valor > 0:
+                    self.resize_h.delete(0, "end")
+                    self.resize_h.insert(0, str(max(1, round(valor * ao / lo))))
+            else:
+                valor = int(self.resize_h.get().strip() or 0)
+                if valor > 0:
+                    self.resize_w.delete(0, "end")
+                    self.resize_w.insert(0, str(max(1, round(valor * lo / ao))))
+        except ValueError:
+            pass
+        self._update_resize_label()
+
+    def _update_resize_label(self):
+        if not self.current_path:
+            self.resize_label.configure(text="Abra uma foto para redimensionar.")
+            return
+        tamanho = rz.get_size(self.current_path)
+        if not tamanho:
+            self.resize_label.configure(text="")
+            return
+        cadeado = "proporção travada" if self.keep_ratio_var.get() else "proporção livre"
+        self.resize_label.configure(text="Original: %d × %d px · %s" % (tamanho[0], tamanho[1], cadeado))
+
+    def on_resize(self):
+        if not self.current_path:
+            messagebox.showinfo("Nenhuma foto aberta", "Abra uma foto primeiro.")
+            return
+        try:
+            largura = int(self.resize_w.get().strip() or 0) or None
+            altura = int(self.resize_h.get().strip() or 0) or None
+            qualidade = int(self.resize_q.get().strip() or rz.DEFAULT_QUALITY)
+        except ValueError:
+            messagebox.showinfo("Valores inválidos",
+                                "Largura, altura e qualidade precisam ser números.")
+            return
+        if not largura and not altura:
+            messagebox.showinfo("Falta o tamanho",
+                                "Informe a largura, a altura, ou as duas.")
+            return
+
+        sobrescrever = bool(self.overwrite_var.get())
+        if sobrescrever and not messagebox.askyesno(
+            "Sobrescrever o original?",
+            "Isto recodifica o arquivo original — não dá pra desfazer, e "
+            "recodificar sempre perde alguma qualidade.\n\nContinuar?"):
+            return
+
+        try:
+            r = rz.resize(self.current_path, largura=largura, altura=altura,
+                          manter_proporcao=self.keep_ratio_var.get(),
+                          qualidade=qualidade, sobrescrever=sobrescrever)
+        except rz.ResizeError as e:
+            messagebox.showerror("Não consegui redimensionar", str(e))
+            return
+
+        if not r["mudou"]:
+            self.resize_label.configure(text=r["aviso"], style="Warning.TLabel")
+            return
+
+        texto = "%d × %d  →  %d × %d · %s" % (
+            r["de"][0], r["de"][1], r["para"][0], r["para"][1],
+            os.path.basename(r["destino"]))
+        if r["aviso"]:
+            texto += "\n⚠ " + r["aviso"]
+        self.resize_label.configure(text=texto, style="Dim.TLabel")
+
+        if sobrescrever:
+            self._open_photo(self.current_path)
+        elif messagebox.askyesno("Pronto",
+                                 "%s\n\nAbrir a cópia redimensionada?" % texto):
+            self._open_photo(r["destino"])
+
+
+    def _fill_agency_fields(self, fields):
+        """Preenche o bloco de banco de imagens. As listas suspensas
+        guardam o VALOR gravado no arquivo; a tela mostra o rótulo."""
+        for widget, valor in ((self.object_name_entry, fields.object_name),
+                              (self.alt_text_entry, fields.alt_text)):
+            widget.delete(0, "end")
+            widget.insert(0, valor or "")
+        self.ext_descr_text.delete("1.0", "end")
+        self.ext_descr_text.insert("1.0", fields.extended_description or "")
+
+        for var, mapa, valor in (
+            (self.digital_source_var, self._digital_map, fields.digital_source),
+            (self.model_release_var, self._model_map, fields.model_release),
+            (self.property_release_var, self._prop_map, fields.property_release),
+        ):
+            rotulo = next((r for r, v in mapa.items() if v == (valor or "")), None)
+            var.set(rotulo if rotulo else next(iter(mapa)))
+
+    def _update_keywords_counter(self, _event=None):
+        """Conta as tags e avisa ao passar do limite das agências."""
+        n = len(PhotoFields.keywords_from_text(self.keywords_entry.get()))
+        if n > KEYWORD_SOFT_LIMIT:
+            menor = min(KEYWORD_LIMITS.values())
+            self.keywords_counter.configure(
+                text="%d tags — acima do limite (%s aceita %d)"
+                     % (n, "Adobe Stock", KEYWORD_LIMITS["Adobe Stock"]),
+                style="Warning.TLabel")
+        else:
+            self.keywords_counter.configure(
+                text="%d tag(s) · limite %d" % (n, KEYWORD_SOFT_LIMIT),
+                style="Dim.TLabel")
 
     def _set_date_entry(self, valor):
         self.date_entry.delete(0, "end")
@@ -503,6 +772,12 @@ class MetadataTab(ttk.Frame):
             source=self.source_entry.get().strip(),
             usage_terms=self.usage_terms_entry.get().strip(),
             sublocation=self.sublocation_entry.get().strip(),
+            object_name=self.object_name_entry.get().strip(),
+            alt_text=self.alt_text_entry.get().strip(),
+            extended_description=self.ext_descr_text.get("1.0", "end-1c").strip(),
+            digital_source=self._digital_map.get(self.digital_source_var.get(), ""),
+            model_release=self._model_map.get(self.model_release_var.get(), ""),
+            property_release=self._prop_map.get(self.property_release_var.get(), ""),
             country_code=self.country_code_entry.get().strip(),
             # a digitada vence a da câmera; em branco mantém a da câmera
             date_created=self._parse_date_entry() or self.current_fields.date_created,
@@ -606,6 +881,8 @@ class MetadataTab(ttk.Frame):
         for key in STICKY_FIELD_KEYS:
             widgets[key].delete(0, "end")
             widgets[key].insert(0, getattr(fields, key, "") or "")
+        self._fill_agency_fields(fields)
+        self._update_keywords_counter()
         if travados:
             self._set_photo_fields_enabled(False)
 
@@ -748,6 +1025,63 @@ class BatchWindow(tk.Toplevel):
             self.value_widgets[key] = entry
 
         ttk.Separator(form).pack(fill="x", pady=10)
+        # ------------------------------------------- banco de imagens
+        ttk.Separator(right).pack(fill="x", pady=(14, 0))
+        ttk.Label(right, text="Banco de imagens", style="Section.TLabel").pack(anchor="w", pady=(10, 0))
+        ttk.Label(
+            right,
+            text="Campos que as agências passaram a exigir. Sem a declaração de "
+                 "origem, envios com IA são recusados; sem status de liberação, "
+                 "foto com pessoa reconhecível também.",
+            style="Dim.TLabel", wraplength=640, justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+
+        ttk.Label(right, text="Título de venda (curto — é o que aparece na busca):").pack(anchor="w")
+        self.object_name_entry = ttk.Entry(right)
+        self.object_name_entry.pack(fill="x")
+
+        ttk.Label(right, text="Texto alternativo (acessibilidade — descreva a imagem em uma frase):").pack(anchor="w", pady=(8, 0))
+        self.alt_text_entry = ttk.Entry(right)
+        self.alt_text_entry.pack(fill="x")
+
+        ttk.Label(right, text="Descrição estendida (acessibilidade — opcional):").pack(anchor="w", pady=(8, 0))
+        self.ext_descr_text = tk.Text(right, height=2, wrap="word")
+        theme.style_text_card(self.ext_descr_text)
+        self.ext_descr_text.pack(fill="x")
+
+        origem_frame = ttk.Frame(right)
+        origem_frame.pack(fill="x", pady=(8, 0))
+        col_a = ttk.Frame(origem_frame)
+        col_a.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ttk.Label(col_a, text="Origem digital (declaração de IA):").pack(anchor="w")
+        self._digital_labels = [rot for _iri, rot in DIGITAL_SOURCES]
+        self._digital_map = {rot: iri for iri, rot in DIGITAL_SOURCES}
+        self.digital_source_var = tk.StringVar(value=self._digital_labels[0])
+        ttk.Combobox(col_a, textvariable=self.digital_source_var, state="readonly",
+                     values=self._digital_labels).pack(fill="x")
+
+        rel_frame = ttk.Frame(right)
+        rel_frame.pack(fill="x", pady=(8, 0))
+        col_b = ttk.Frame(rel_frame)
+        col_b.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ttk.Label(col_b, text="Liberação de modelo:").pack(anchor="w")
+        self._model_labels = [rot for _v, rot in RELEASE_STATUSES]
+        self._model_map = {rot: v for v, rot in RELEASE_STATUSES}
+        self.model_release_var = tk.StringVar(value=self._model_labels[0])
+        ttk.Combobox(col_b, textvariable=self.model_release_var, state="readonly",
+                     values=self._model_labels).pack(fill="x")
+        col_c = ttk.Frame(rel_frame)
+        col_c.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        ttk.Label(col_c, text="Liberação de propriedade:").pack(anchor="w")
+        self._prop_labels = [rot for _v, rot in PROPERTY_RELEASE_STATUSES]
+        self._prop_map = {rot: v for v, rot in PROPERTY_RELEASE_STATUSES}
+        self.property_release_var = tk.StringVar(value=self._prop_labels[0])
+        ttk.Combobox(col_c, textvariable=self.property_release_var, state="readonly",
+                     values=self._prop_labels).pack(fill="x")
+
+        ttk.Separator(right).pack(fill="x", pady=(14, 0))
+        self._build_resize_section(right)
+
         self.custom_editor = CustomFieldsEditor(
             form,
             "Grava qualquer tag do ExifTool em TODAS as fotos selecionadas (ex.: \"XMP:Rating\"). "

@@ -24,6 +24,52 @@ import platform_utils
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".tif", ".tiff", ".png"}
 
+# --------------------------------------------- vocabulários de agência
+
+# Origem digital (IPTC DigitalSourceType). Deixou de ser opcional:
+# Adobe Stock, Getty e Shutterstock exigem declarar se a imagem foi
+# gerada ou alterada por IA, e envio sem isso é recusado ou removido.
+# O valor gravado é a IRI do vocabulário oficial do IPTC; o rótulo é só
+# o que aparece na tela.
+DIGITAL_SOURCE_BASE = "http://cv.iptc.org/newscodes/digitalsourcetype/"
+DIGITAL_SOURCES = [
+    ("", "— não declarado —"),
+    (DIGITAL_SOURCE_BASE + "digitalCapture", "Foto de câmera digital"),
+    (DIGITAL_SOURCE_BASE + "negativeFilm", "Filme negativo digitalizado"),
+    (DIGITAL_SOURCE_BASE + "positiveFilm", "Slide/positivo digitalizado"),
+    (DIGITAL_SOURCE_BASE + "print", "Impresso digitalizado"),
+    (DIGITAL_SOURCE_BASE + "minorHumanEdits", "Foto com edições menores"),
+    (DIGITAL_SOURCE_BASE + "compositeCapture", "Composição de fotos reais"),
+    (DIGITAL_SOURCE_BASE + "algorithmicallyEnhanced", "Foto melhorada por algoritmo"),
+    (DIGITAL_SOURCE_BASE + "compositeWithTrainedAlgorithmicMedia",
+     "Foto real com elementos gerados por IA"),
+    (DIGITAL_SOURCE_BASE + "trainedAlgorithmicMedia", "Gerada por IA"),
+]
+
+# Liberação de modelo e de propriedade (vocabulário PLUS). Foto com
+# pessoa reconhecível ou propriedade privada sem status marcado é
+# recusada pelas agências.
+RELEASE_STATUSES = [
+    ("", "— não declarado —"),
+    ("Not Applicable", "Não se aplica"),
+    ("Unlimited Model Releases", "Liberação total"),
+    ("Limited or Incomplete Model Releases", "Liberação parcial"),
+    ("None", "Sem liberação"),
+]
+
+PROPERTY_RELEASE_STATUSES = [
+    ("", "— não declarado —"),
+    ("Not Applicable", "Não se aplica"),
+    ("Unlimited Property Releases", "Liberação total"),
+    ("Limited or Incomplete Property Releases", "Liberação parcial"),
+    ("None", "Sem liberação"),
+]
+
+# Limites de palavra-chave das agências. Passar disso trunca ou reprova
+# o envio — melhor avisar na tela que descobrir na rejeição.
+KEYWORD_LIMITS = {"Adobe Stock": 49, "Shutterstock": 50, "Getty": 50}
+KEYWORD_SOFT_LIMIT = 49
+
 # --------------------------------------------------------------- ExifTool
 
 def _bundled_exiftool_path() -> Optional[str]:
@@ -107,6 +153,14 @@ class PhotoFields:
     credit: str = ""
     source: str = ""
     usage_terms: str = ""
+
+    # --- exigências de banco de imagens ---
+    object_name: str = ""          # título curto de venda (≠ headline)
+    alt_text: str = ""             # texto alternativo de acessibilidade
+    extended_description: str = ""  # descrição longa de acessibilidade
+    digital_source: str = ""       # IRI da origem digital (declaração de IA)
+    model_release: str = ""        # status PLUS de liberação de modelo
+    property_release: str = ""     # status PLUS de liberação de propriedade
     # Vem do EXIF da câmera, mas passa a ser EDITÁVEL: câmera com data
     # errada, foto escaneada e material de arquivo são casos reais em que
     # a data da captura precisa ser corrigida à mão.
@@ -166,6 +220,17 @@ SCALAR_FIELD_TAGS: Dict[str, List[str]] = {
     "credit": ["IPTC:Credit"],
     "source": ["IPTC:Source"],
     "usage_terms": ["XMP-xmpRights:UsageTerms"],
+    # título curto de venda. Várias agências usam ObjectName, e não o
+    # Headline, como o título que aparece na busca.
+    "object_name": ["IPTC:ObjectName", "XMP-dc:Title"],
+    # ATENÇÃO ao grupo: as tags de acessibilidade vivem em
+    # XMP-iptcCore, NÃO em XMP-iptcExt. Escrevê-las no grupo errado
+    # falha em silêncio — o ExifTool avisa e não grava nada.
+    "alt_text": ["XMP-iptcCore:AltTextAccessibility"],
+    "extended_description": ["XMP-iptcCore:ExtDescrAccessibility"],
+    "digital_source": ["XMP-iptcExt:DigitalSourceType"],
+    "model_release": ["XMP-plus:ModelReleaseStatus"],
+    "property_release": ["XMP-plus:PropertyReleaseStatus"],
 }
 KEYWORDS_TAGS = ["IPTC:Keywords", "XMP-dc:Subject"]
 ALL_FIELD_KEYS = list(SCALAR_FIELD_TAGS.keys()) + ["keywords"]
@@ -196,6 +261,12 @@ FIELD_LABELS: Dict[str, str] = {
     "credit": "Crédito",
     "source": "Fonte",
     "usage_terms": "Termos de uso/Licença",
+    "object_name": "Título de venda",
+    "alt_text": "Texto alternativo (acessibilidade)",
+    "extended_description": "Descrição estendida (acessibilidade)",
+    "digital_source": "Origem digital / declaração de IA",
+    "model_release": "Liberação de modelo",
+    "property_release": "Liberação de propriedade",
 }
 
 # Campos que fazem sentido repetir automaticamente entre fotos de um mesmo
@@ -203,7 +274,8 @@ FIELD_LABELS: Dict[str, str] = {
 # começam desmarcados por padrão na tela de lote.
 BATCH_DEFAULT_CHECKED = {
     "keywords", "creator", "creator_url", "sublocation", "city", "state",
-    "country", "country_code",
+    "country", "country_code", "digital_source", "model_release",
+    "property_release",
     "copyright", "credit", "source", "usage_terms",
 }
 
@@ -270,6 +342,12 @@ def read_existing_fields(path: str) -> PhotoFields:
             "-IPTC:Credit",
             "-IPTC:Source",
             "-XMP-xmpRights:UsageTerms",
+            "-IPTC:ObjectName",
+            "-XMP-iptcCore:AltTextAccessibility",
+            "-XMP-iptcCore:ExtDescrAccessibility",
+            "-XMP-iptcExt:DigitalSourceType",
+            "-XMP-plus:ModelReleaseStatus",
+            "-XMP-plus:PropertyReleaseStatus",
             "-Keywords",
             "-DateTimeOriginal",
             "-CreateDate",
@@ -309,6 +387,12 @@ def read_existing_fields(path: str) -> PhotoFields:
         credit=data.get("Credit", "") or "",
         source=data.get("Source", "") or "",
         usage_terms=data.get("UsageTerms", "") or "",
+        object_name=data.get("ObjectName", "") or "",
+        alt_text=data.get("AltTextAccessibility", "") or "",
+        extended_description=data.get("ExtDescrAccessibility", "") or "",
+        digital_source=data.get("DigitalSourceType", "") or "",
+        model_release=data.get("ModelReleaseStatus", "") or "",
+        property_release=data.get("PropertyReleaseStatus", "") or "",
         date_created=dt,
     )
 
