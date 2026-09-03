@@ -93,7 +93,10 @@ a = Analysis(
         "tkinter", "tkinter.ttk", "tkinter.filedialog",
         "tkinter.messagebox", "tkinter.font",
         "PIL._tkinter_finder",
-        "openpyxl", "reportlab", "piexif",
+        # openpyxl, reportlab e piexif sairam junto com o requirements:
+        # vieram do CineBrain OS no fork e nunca foram usados aqui. Como
+        # import oculto de pacote ausente, so geravam tres ERROR no log
+        # de cada build.
     ],
     hookspath=[],
     hooksconfig={},
