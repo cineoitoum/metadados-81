@@ -13,11 +13,13 @@ app empacotado).
 """
 
 import sys
+import re
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 import platform_utils
 import theme
+from metadata_engine import load_prefs
 from tab_metadata import MetadataTab
 from ui_common import DND_AVAILABLE, TkinterDnD
 
@@ -30,8 +32,8 @@ class App(_BaseTk):
     def __init__(self):
         super().__init__()
         self.title(theme.APP_NAME)
-        self.geometry("1120x880")
         self.minsize(900, 640)
+        self._restaurar_geometria()
         theme.apply(self)
 
         cabecalho = ttk.Frame(self, style="Container.TFrame", padding=(14, 8))
@@ -43,10 +45,12 @@ class App(_BaseTk):
         ttk.Button(cabecalho, text="Sobre", style="ContainerGhost.TButton",
                    command=self._show_about).pack(side="right")
 
-        self._build_menubar()
-
+        # A aba vem ANTES do menu: o menu Foto aponta para os métodos
+        # dela, então ela precisa existir na hora de montá-lo.
         self.metadata_tab = MetadataTab(self)
         self.metadata_tab.pack(fill="both", expand=True)
+
+        self._build_menubar()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -75,6 +79,34 @@ class App(_BaseTk):
             apple.add_command(label="Sobre o %s" % theme.APP_NAME,
                               command=self._show_about)
             apple.add_separator()
+
+        # Menu Foto: catalogar é tarefa repetitiva, e tirar a mão do
+        # teclado a cada arquivo custa caro. O menu existe menos pra ser
+        # clicado e mais pra ANUNCIAR os atalhos — sem ele ninguém
+        # descobre que dá pra passar as fotos com ⌘← e ⌘→.
+        mod = "Command" if platform_utils.is_macos() else "Control"
+        simbolo = "⌘" if platform_utils.is_macos() else "Ctrl+"
+        aba = self.metadata_tab
+
+        foto = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Foto", menu=foto)
+        for rotulo, tecla, mostrar, acao in (
+            ("Abrir foto...", "o", "O", aba.on_open),
+            (None, None, None, None),
+            ("Foto anterior", "Left", "←", aba.on_prev_photo),
+            ("Próxima foto", "Right", "→", aba.on_next_photo),
+            (None, None, None, None),
+            ("Salvar metadados", "s", "S", aba.on_save),
+            ("Reverter alterações", "r", "R", aba.on_revert),
+        ):
+            if rotulo is None:
+                foto.add_separator()
+                continue
+            foto.add_command(label=rotulo, accelerator=simbolo + mostrar,
+                             command=acao)
+            # o bind é no toplevel pra valer com o foco em qualquer campo
+            self.bind_all("<%s-%s>" % (mod, tecla),
+                          lambda _e, f=acao: (f(), "break")[1])
 
         editar = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Editar", menu=editar)
@@ -197,9 +229,34 @@ class App(_BaseTk):
         except Exception:
             pass
 
+    def _restaurar_geometria(self):
+        """Reabre do tamanho e no lugar em que foi fechado.
+
+        Se a posição salva estiver fora das telas atuais — monitor
+        desconectado, por exemplo — só o TAMANHO é aplicado, e o sistema
+        posiciona a janela. Senão o app abriria invisível."""
+        salvo = str(load_prefs().get("geometria", "") or "")
+        if not re.fullmatch(r"\d+x\d+([+-]\d+[+-]\d+)?", salvo):
+            self.geometry("1120x880")
+            return
+        if "+" in salvo or "-" in salvo.split("x")[1]:
+            tamanho, _, posicao = salvo.partition("+") if "+" in salvo else (salvo, "", "")
+            try:
+                x, y = (int(v) for v in posicao.split("+"))
+                if -50 <= x <= self.winfo_screenwidth() - 200 and \
+                        0 <= y <= self.winfo_screenheight() - 150:
+                    self.geometry(salvo)
+                    return
+            except ValueError:
+                pass
+            self.geometry(tamanho)
+            return
+        self.geometry(salvo)
+
     def _on_close(self):
-        # grava as preferências de campos "de casa" antes de sair
-        self.metadata_tab.on_app_close()
+        # grava as preferências de campos "de casa" antes de sair.
+        # Uma gravação só: duas sobrescreveriam uma à outra.
+        self.metadata_tab.on_app_close(geometria=self.winfo_geometry())
         self.destroy()
 
 

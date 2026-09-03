@@ -83,6 +83,12 @@ class MetadataTab(ttk.Frame):
         # Sem isso, uma linha já salva era contada como alteração pendente.
         self._custom_salvos = {}
         self._form_baseline = None
+        # Fotos da pasta da foto aberta, pra navegar com ‹ › sem voltar
+        # ao seletor de arquivos.
+        # rótulos que podem receber o marcador de obrigatório
+        self._rotulos = {}
+        self._fotos_da_pasta = []
+        self._indice_atual = -1
         self.thumb_imgtk = None  # precisa manter referência
 
         self._profile_labels = dict(list_profiles())
@@ -94,6 +100,7 @@ class MetadataTab(ttk.Frame):
         self._build_ui()
         self._set_photo_fields_enabled(False)
         self._apply_prefs_to_sticky_fields()
+        self._marcar_obrigatorios()
         self._on_profile_change()
 
         if DND_AVAILABLE:
@@ -108,10 +115,13 @@ class MetadataTab(ttk.Frame):
                 "(Mac: 'brew install exiftool' / Windows: instalador oficial).",
             )
 
-    def on_app_close(self):
+    def on_app_close(self, geometria=""):
         """Chamado pela janela raiz antes de fechar — persiste os campos
         'de casa' mesmo que o usuário nunca tenha clicado em Salvar."""
-        save_prefs(self._current_sticky_prefs())
+        prefs = self._current_sticky_prefs()
+        if geometria:
+            prefs["geometria"] = geometria
+        save_prefs(prefs)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -119,6 +129,21 @@ class MetadataTab(ttk.Frame):
         top.pack(fill="x")
 
         ttk.Button(top, text="Abrir foto...", command=self.on_open).pack(side="left")
+
+        # Passar as fotos da pasta sem voltar ao diálogo a cada arquivo.
+        # Catalogar um ensaio é a tarefa longa deste app, e abrir um
+        # seletor de arquivos por foto era o maior atrito que sobrava.
+        nav = ttk.Frame(top)
+        nav.pack(side="left", padx=(10, 0))
+        self.prev_button = ttk.Button(nav, text="‹", width=3,
+                                      command=self.on_prev_photo)
+        self.prev_button.pack(side="left")
+        self.next_button = ttk.Button(nav, text="›", width=3,
+                                      command=self.on_next_photo)
+        self.next_button.pack(side="left", padx=(4, 0))
+        self.nav_label = ttk.Label(nav, text="", style="Dim.TLabel")
+        self.nav_label.pack(side="left", padx=(8, 0))
+
         self.path_label = ttk.Label(top, text="Nenhuma foto aberta (ou arraste um arquivo pra cá)", foreground=theme.FG_DIM)
         self.path_label.pack(side="left", padx=10)
 
@@ -132,6 +157,8 @@ class MetadataTab(ttk.Frame):
         )
         profile_combo.pack(side="left")
         profile_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_profile_change())
+        ttk.Label(profile_frame, text="  •  = exigido por este perfil",
+                  style="Dim.TLabel").pack(side="left", padx=(8, 0))
 
         # AÇÕES PRIMEIRO, presas ao rodapé da janela.
         # Precisam ser empacotadas ANTES da área rolável: o pack do Tk dá
@@ -149,6 +176,9 @@ class MetadataTab(ttk.Frame):
                    command=self.on_open_batch).pack(side="right", padx=(0, 8))
         ttk.Button(acoes, text="Salvar metadados", style="Neon.TButton",
                    command=self.on_save).pack(side="right")
+        self.revert_button = ttk.Button(acoes, text="Reverter",
+                                        command=self.on_revert)
+        self.revert_button.pack(side="right", padx=(0, 8))
         self.status_label = ttk.Label(acoes, text="", foreground=theme.SUCCESS)
         self.status_label.pack(side="left", padx=(16, 0))
 
@@ -222,7 +252,7 @@ class MetadataTab(ttk.Frame):
         self.caption_counter = ttk.Label(sec, text="", style="Dim.TLabel")
         self.caption_counter.pack(anchor="e")
 
-        ttk.Label(sec, text="Título (Headline):").pack(anchor="w", pady=(8, 0))
+        self._rotulo(sec, "headline", "Título (Headline):", pady=(8, 0))
         self.headline_entry = ttk.Entry(sec)
         self.headline_entry.pack(fill="x")
 
@@ -232,7 +262,8 @@ class MetadataTab(ttk.Frame):
 
         kw_head = ttk.Frame(sec)
         kw_head.pack(fill="x", pady=(8, 0))
-        ttk.Label(kw_head, text="Palavras-chave (separadas por vírgula):").pack(side="left")
+        self._rotulo(kw_head, "keywords", "Palavras-chave (separadas por vírgula):",
+                     side="left")
         # Adobe aceita 49 e Shutterstock 50; passar disso trunca ou
         # reprova o envio. Melhor saber aqui que na rejeição.
         self.keywords_counter = ttk.Label(kw_head, text="", style="Dim.TLabel")
@@ -244,7 +275,7 @@ class MetadataTab(ttk.Frame):
         # ------------------------------------------------------ 2. autoria
         sec = self._secao(right, "Autoria")
         esq, dir_ = self._dupla(sec)
-        ttk.Label(esq, text="Criador (fotógrafo/autor):").pack(anchor="w")
+        self._rotulo(esq, "creator", "Criador (fotógrafo/autor):")
         self.creator_entry = ttk.Entry(esq)
         self.creator_entry.pack(fill="x")
         ttk.Label(dir_, text="Site ou contato:").pack(anchor="w")
@@ -273,7 +304,7 @@ class MetadataTab(ttk.Frame):
             else:
                 col.pack(side="left", fill="x", expand=True,
                          padx=(0, 6) if atributo == "city_entry" else (6, 0))
-            ttk.Label(col, text=rotulo).pack(anchor="w")
+            self._rotulo(col, atributo.replace("_entry", ""), rotulo)
             campo = ttk.Entry(col, width=largura) if largura else ttk.Entry(col)
             campo.pack(fill="x" if not largura else "none")
             setattr(self, atributo, campo)
@@ -313,11 +344,13 @@ class MetadataTab(ttk.Frame):
             "Sem a declaração de origem, envios com IA são recusados. Sem status "
             "de liberação, foto com pessoa reconhecível também.")
 
-        ttk.Label(sec, text="Título de venda (curto — é o que aparece na busca):").pack(anchor="w")
+        self._rotulo(sec, "object_name",
+                     "Título de venda (curto — é o que aparece na busca):")
         self.object_name_entry = ttk.Entry(sec)
         self.object_name_entry.pack(fill="x")
 
-        ttk.Label(sec, text="Origem digital (declaração de IA):").pack(anchor="w", pady=(8, 0))
+        self._rotulo(sec, "digital_source", "Origem digital (declaração de IA):",
+                     pady=(8, 0))
         self._digital_labels = [rot for _iri, rot in DIGITAL_SOURCES]
         self._digital_map = {rot: iri for iri, rot in DIGITAL_SOURCES}
         self.digital_source_var = tk.StringVar(value=self._digital_labels[0])
@@ -325,7 +358,7 @@ class MetadataTab(ttk.Frame):
                      values=self._digital_labels).pack(fill="x")
 
         esq, dir_ = self._dupla(sec, pady=(8, 0))
-        ttk.Label(esq, text="Liberação de modelo:").pack(anchor="w")
+        self._rotulo(esq, "model_release", "Liberação de modelo:")
         self._model_labels = [rot for _v, rot in RELEASE_STATUSES]
         self._model_map = {rot: v for v, rot in RELEASE_STATUSES}
         self.model_release_var = tk.StringVar(value=self._model_labels[0])
@@ -345,7 +378,7 @@ class MetadataTab(ttk.Frame):
         sec = self._secao(
             right, "Acessibilidade",
             "Descreve a imagem para quem usa leitor de tela.")
-        ttk.Label(sec, text="Texto alternativo (uma frase):").pack(anchor="w")
+        self._rotulo(sec, "alt_text", "Texto alternativo (uma frase):")
         self.alt_text_entry = ttk.Entry(sec)
         self.alt_text_entry.pack(fill="x")
         ttk.Label(sec, text="Descrição estendida:").pack(anchor="w", pady=(8, 0))
@@ -408,6 +441,24 @@ class MetadataTab(ttk.Frame):
         bind_mousewheel(canvas, body)
         bind_mousewheel(painel_canvas, painel_body)
 
+    # ------------------------------------------------ campos obrigatórios
+
+    def _rotulo(self, parent, chave, texto, side=None, pady=(0, 0)):
+        """Rótulo que ganha um marcador quando o perfil ativo exige o
+        campo. Antes só se descobria o que faltava ao clicar em Salvar."""
+        w = ttk.Label(parent, text=texto)
+        if side:
+            w.pack(side=side, pady=pady)
+        else:
+            w.pack(anchor="w", pady=pady)
+        self._rotulos[chave] = (w, texto)
+        return w
+
+    def _marcar_obrigatorios(self):
+        exigidos = get_profile(self.active_profile_key)["required"]
+        for chave, (w, texto) in self._rotulos.items():
+            w.configure(text=(texto + "  •") if chave in exigidos else texto)
+
     # ------------------------------------------------ blocos de diagramação
 
     def _cabecalho_secao(self, parent, titulo, primeira=False, descricao=None):
@@ -462,8 +513,12 @@ class MetadataTab(ttk.Frame):
                 widgets[key].insert(0, value)
 
     def _current_sticky_prefs(self) -> dict:
+        # Parte do que já está gravado em vez de montar do zero: assim
+        # uma chave que esta função não conhece — a geometria da janela,
+        # por exemplo — sobrevive a cada Salvar em vez de ser apagada.
+        prefs = load_prefs()
         widgets = self._sticky_widgets()
-        prefs = {key: widgets[key].get().strip() for key in STICKY_FIELD_KEYS}
+        prefs.update({key: widgets[key].get().strip() for key in STICKY_FIELD_KEYS})
         prefs["profile"] = self.active_profile_key
         return prefs
 
@@ -483,7 +538,10 @@ class MetadataTab(ttk.Frame):
             hint += ")"
         else:
             hint = " (sem limite de caracteres neste perfil)"
-        self.caption_label.configure(text="Legenda/Descrição:" + hint)
+        self.caption_label.configure(
+            text="Legenda/Descrição:" + hint +
+                 ("  •" if "caption" in profile["required"] else ""))
+        self._marcar_obrigatorios()
         self._update_caption_counter()
 
     def _on_drop_photo(self, event):
@@ -560,7 +618,96 @@ class MetadataTab(ttk.Frame):
         # retrato do formulário recém-montado: tudo o que divergir daqui
         # pra frente foi a pessoa que digitou
         self._form_baseline = self._collect_fields()
-        self.status_label.configure(text="")
+        self._indexar_pasta(path)
+        self._avisar_se_ja_catalogada(existing)
+
+    # ------------------------------------------- navegação pela pasta
+
+    def _indexar_pasta(self, path):
+        """Guarda as fotos da pasta e onde estamos nela."""
+        pasta = os.path.dirname(os.path.abspath(path))
+        if not self._fotos_da_pasta or \
+                os.path.dirname(self._fotos_da_pasta[0]) != pasta:
+            self._fotos_da_pasta = list_image_files(pasta)
+        try:
+            self._indice_atual = self._fotos_da_pasta.index(os.path.abspath(path))
+        except ValueError:
+            # foto fora da listagem (extensão incomum, arquivo movido):
+            # navega dentro do que existe, sem quebrar
+            self._indice_atual = -1
+        self._atualizar_navegacao()
+
+    def _atualizar_navegacao(self):
+        total = len(self._fotos_da_pasta)
+        if total <= 1 or self._indice_atual < 0:
+            self.nav_label.configure(text="")
+            self.prev_button.state(["disabled"])
+            self.next_button.state(["disabled"])
+            return
+        self.nav_label.configure(text="%d de %d" % (self._indice_atual + 1, total))
+        self.prev_button.state(["!disabled"] if self._indice_atual > 0 else ["disabled"])
+        self.next_button.state(["!disabled"] if self._indice_atual < total - 1 else ["disabled"])
+
+    def _pode_trocar_de_foto(self) -> bool:
+        """Sair da foto com metadado digitado e não salvo perderia o
+        trabalho em silêncio — a foto seguinte recarrega o formulário."""
+        if not self._form_differs_from_file():
+            return True
+        resposta = messagebox.askyesnocancel(
+            "Metadados não salvos",
+            "Você preencheu campos que ainda não foram gravados nesta foto.\n\n"
+            "Salvar antes de passar para a próxima?")
+        if resposta is None:
+            return False
+        if resposta:
+            self.on_save()
+            # se a gravação falhou, o formulário ainda difere: não sai
+            return not self._form_differs_from_file()
+        return True
+
+    def _ir_para(self, indice):
+        if not (0 <= indice < len(self._fotos_da_pasta)):
+            return
+        if not self._pode_trocar_de_foto():
+            return
+        self._open_photo(self._fotos_da_pasta[indice])
+
+    def on_prev_photo(self, _event=None):
+        self._ir_para(self._indice_atual - 1)
+
+    def on_next_photo(self, _event=None):
+        self._ir_para(self._indice_atual + 1)
+
+    # ------------------------------------------------------- reverter
+
+    def on_revert(self, _event=None):
+        """Descarta o que foi digitado e relê do arquivo. É o único
+        desfazer que o app tem — sem ele, digitar por cima de uma
+        legenda boa não tinha volta a não ser reabrir a foto."""
+        if not self.current_path:
+            return
+        if not self._form_differs_from_file():
+            self.status_label.configure(
+                text="Nada a reverter — o formulário está igual ao arquivo.",
+                foreground=theme.FG_DIM)
+            return
+        if not messagebox.askyesno(
+                "Reverter alterações?",
+                "Isto descarta o que você digitou e recarrega os metadados "
+                "gravados no arquivo.\n\nO arquivo em si não é alterado."):
+            return
+        self._open_photo(self.current_path)
+        self.status_label.configure(text="Formulário recarregado do arquivo.",
+                                    foreground=theme.FG_DIM)
+
+    def _avisar_se_ja_catalogada(self, fields):
+        """Num ensaio grande é fácil não lembrar onde parou."""
+        if fields.caption and fields.keywords:
+            self.status_label.configure(
+                text="Esta foto já tem legenda e palavras-chave gravadas.",
+                foreground=theme.FG_DIM)
+        else:
+            self.status_label.configure(text="")
 
     def _fill_form(self, fields: PhotoFields):
         self.caption_text.delete("1.0", "end")

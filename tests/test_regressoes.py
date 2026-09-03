@@ -219,3 +219,84 @@ def test_data_invalida_avisa_em_vez_de_sumir(aba, foto):
         assert aba._parse_date_entry() is None
 
     assert aviso.called
+
+
+# --------------------------------------------------- navegação e reverter
+
+def _pasta_com_fotos(foto, quantas=4):
+    return [foto("foto%02d.jpg" % i) for i in range(1, quantas + 1)]
+
+
+def test_navega_pela_pasta(aba, foto):
+    caminhos = _pasta_com_fotos(foto)
+    aba._open_photo(caminhos[0])
+    aba.update_idletasks()
+
+    assert aba.nav_label.cget("text") == "1 de 4"
+    assert "disabled" in aba.prev_button.state(), "não há foto antes da primeira"
+
+    aba.on_next_photo()
+    aba.update_idletasks()
+    assert os.path.basename(aba.current_path) == "foto02.jpg"
+
+    aba.on_prev_photo()
+    aba.update_idletasks()
+    assert os.path.basename(aba.current_path) == "foto01.jpg"
+
+
+def test_navegar_nao_descarta_texto_digitado(aba, foto):
+    """Trocar de foto recarrega o formulário: sair sem avisar apagaria
+    em silêncio o que a pessoa acabou de escrever."""
+    import tab_metadata
+
+    caminhos = _pasta_com_fotos(foto, 2)
+    aba._open_photo(caminhos[0])
+    aba.update_idletasks()
+    aba.caption_text.insert("1.0", "legenda que não pode sumir")
+
+    with mock.patch.object(tab_metadata.messagebox, "askyesnocancel",
+                           return_value=None) as pergunta:
+        aba.on_next_photo()
+
+    assert pergunta.called
+    assert os.path.basename(aba.current_path) == "foto01.jpg", "não devia ter saído"
+
+
+def test_reverter_recarrega_do_arquivo(aba, foto):
+    import tab_metadata
+
+    aba._open_photo(foto("revert.jpg"))
+    aba.update_idletasks()
+    aba.caption_text.insert("1.0", "texto temporário")
+
+    with mock.patch.object(tab_metadata.messagebox, "askyesno", return_value=True):
+        aba.on_revert()
+    aba.update_idletasks()
+
+    assert aba.caption_text.get("1.0", "end-1c") == ""
+
+
+def test_marcador_de_obrigatorio_segue_o_perfil(aba):
+    def marcados():
+        return {c for c, (w, _t) in aba._rotulos.items()
+                if w.cget("text").endswith("•")}
+
+    aba.profile_var.set("Sem restrições (uso geral)")
+    aba._on_profile_change()
+    assert marcados() == set()
+
+    aba.profile_var.set("Pulsar Imagens")
+    aba._on_profile_change()
+    assert {"creator", "city", "state", "country", "keywords"} <= marcados()
+
+
+def test_salvar_nao_apaga_chaves_que_nao_conhece(aba):
+    """A geometria da janela vive no mesmo arquivo de preferências.
+    Montar o dicionário do zero a cada Salvar apagava ela."""
+    import tab_metadata
+
+    with mock.patch.object(tab_metadata, "load_prefs",
+                           return_value={"geometria": "1200x900+10+20"}):
+        prefs = aba._current_sticky_prefs()
+
+    assert prefs.get("geometria") == "1200x900+10+20"
