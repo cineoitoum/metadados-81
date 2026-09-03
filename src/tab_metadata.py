@@ -155,11 +155,30 @@ class MetadataTab(ttk.Frame):
         # ÁREA ROLÁVEL — o formulário cresceu além da altura da janela com
         # os campos de banco de imagens e o redimensionador, e sem isto o
         # conteúdo de baixo ficava inalcançável.
-        holder = ttk.Frame(self)
+        holder = ttk.Frame(self, padding=(10, 10, 0, 0))
         holder.pack(fill="both", expand=True)
+
+        # O painel da foto fica FORA da rolagem, preso à esquerda. Ele é a
+        # referência que se consulta enquanto se preenche o formulário —
+        # dentro da área rolável ele sumia justamente quando a pessoa
+        # descia até os campos de dimensionar, deixando meia tela vazia.
+        painel = ttk.Frame(holder, width=THUMB_MAX)
+        painel.pack(side="left", fill="y", padx=(0, 18))
+        painel.pack_propagate(False)
+
+        # ...com rolagem própria, porque a ficha técnica é longa e não
+        # cabe inteira numa janela baixa.
+        painel_canvas = tk.Canvas(painel, highlightthickness=0, width=THUMB_MAX)
+        painel_body = ttk.Frame(painel_canvas)
+        painel_body.bind("<Configure>",
+                         lambda _e: painel_canvas.configure(
+                             scrollregion=painel_canvas.bbox("all")))
+        painel_canvas.create_window((0, 0), window=painel_body, anchor="nw")
+        painel_canvas.pack(fill="both", expand=True)
+
         canvas = tk.Canvas(holder, highlightthickness=0)
         vbar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
-        body = ttk.Frame(canvas, padding=10)
+        body = ttk.Frame(canvas, padding=(0, 0, 10, 10))
         body.bind("<Configure>",
                   lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=body, anchor="nw")
@@ -169,213 +188,192 @@ class MetadataTab(ttk.Frame):
         self._form_canvas = canvas
         self._form_body = body
 
-        # coluna esquerda: miniatura + dados só-leitura da câmera
-        left = ttk.Frame(body, width=THUMB_MAX)
-        left.pack(side="left", fill="y", padx=(0, 15))
-        self.thumb_label = ttk.Label(left, text="(sem preview)", relief="groove", anchor="center")
-        self.thumb_label.pack()
-        # A data passa a ser EDITÁVEL. Câmera com data errada, foto
-        # escaneada e material de arquivo são casos reais em que a data da
-        # captura precisa ser corrigida à mão. Vazio = mantém a da câmera.
-        ttk.Label(left, text="Data criada (AAAA-MM-DD HH:MM):").pack(anchor="w", pady=(6, 0))
-        self.date_entry = ttk.Entry(left)
-        self.date_entry.pack(fill="x")
-        ttk.Label(left, text="Deixe em branco para manter a data da câmera.",
-                  style="Dim.TLabel", wraplength=THUMB_MAX, justify="left"
-                  ).pack(anchor="w")
+        # ---------------------------------------- coluna esquerda: a foto
+        # Painel de leitura: o que a foto É. Nada editável mora aqui —
+        # os campos que se digitam ficam todos do lado direito, para que
+        # não seja preciso atravessar a tela pra preencher um formulário.
+        left = painel_body
+
+        self.thumb_label = ttk.Label(left, text="(sem preview)", relief="groove",
+                                     anchor="center")
+        self.thumb_label.pack(fill="x")
+
         # Aviso do perfil sobre o tamanho. Separado da ficha porque é
         # julgamento, não dado: a ficha diz o que a foto É, isto diz se
         # ela serve pro perfil ativo.
         self.res_label = ttk.Label(left, text="", wraplength=THUMB_MAX, justify="left")
-        self.res_label.pack(pady=(8, 0), anchor="w")
+        self.res_label.pack(pady=(10, 0), anchor="w")
 
-        # FICHA TÉCNICA — tudo o que o arquivo sabe sobre si, agrupado.
-        # Substitui os rótulos avulsos de data e GPS que havia aqui.
-        ttk.Label(left, text="Ficha técnica", style="Section.TLabel").pack(
-            anchor="w", pady=(12, 2))
+        self._cabecalho_secao(left, "Ficha técnica", primeira=False)
         self.info_frame = ttk.Frame(left)
         self.info_frame.pack(fill="x")
-        self._render_fileinfo([])
 
-        # coluna direita: campos
+        # ------------------------------------- coluna direita: o que se digita
         right = ttk.Frame(body)
-        right.pack(side="left", fill="both", expand=True)
+        right.pack(fill="both", expand=True)
 
-        self.caption_label = ttk.Label(right, text="Legenda/Descrição:")
+        # ---------------------------------------------------- 1. descrição
+        sec = self._secao(right, "Descrição", primeira=True)
+        self.caption_label = ttk.Label(sec, text="Legenda/Descrição:")
         self.caption_label.pack(anchor="w")
-        self.caption_text = tk.Text(right, height=3, wrap="word")
+        self.caption_text = tk.Text(sec, height=3, wrap="word")
         self.caption_text.pack(fill="x")
         self.caption_text.bind("<KeyRelease>", self._update_caption_counter)
-        self.caption_counter = ttk.Label(right, text="")
+        self.caption_counter = ttk.Label(sec, text="", style="Dim.TLabel")
         self.caption_counter.pack(anchor="e")
 
-        ttk.Label(right, text="Título (Headline) — opcional:").pack(anchor="w", pady=(10, 0))
-        self.headline_entry = ttk.Entry(right)
+        ttk.Label(sec, text="Título (Headline):").pack(anchor="w", pady=(8, 0))
+        self.headline_entry = ttk.Entry(sec)
         self.headline_entry.pack(fill="x")
 
-        ttk.Label(
-            right, text="Descrição ampliada (sem limite de tamanho) — opcional:"
-        ).pack(anchor="w", pady=(10, 0))
-        self.instructions_text = tk.Text(right, height=4, wrap="word")
+        ttk.Label(sec, text="Descrição ampliada:").pack(anchor="w", pady=(8, 0))
+        self.instructions_text = tk.Text(sec, height=4, wrap="word")
         self.instructions_text.pack(fill="x")
 
-        kw_head = ttk.Frame(right)
-        kw_head.pack(fill="x", pady=(10, 0))
-        ttk.Label(kw_head, text="Palavras-chave / tags (separadas por vírgula):").pack(side="left")
+        kw_head = ttk.Frame(sec)
+        kw_head.pack(fill="x", pady=(8, 0))
+        ttk.Label(kw_head, text="Palavras-chave (separadas por vírgula):").pack(side="left")
         # Adobe aceita 49 e Shutterstock 50; passar disso trunca ou
         # reprova o envio. Melhor saber aqui que na rejeição.
         self.keywords_counter = ttk.Label(kw_head, text="", style="Dim.TLabel")
         self.keywords_counter.pack(side="right")
-        self.keywords_entry = ttk.Entry(right)
+        self.keywords_entry = ttk.Entry(sec)
         self.keywords_entry.bind("<KeyRelease>", self._update_keywords_counter)
         self.keywords_entry.pack(fill="x")
 
-        creator_frame = ttk.Frame(right)
-        creator_frame.pack(fill="x", pady=(10, 0))
-        creator_col = ttk.Frame(creator_frame)
-        creator_col.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(creator_col, text="Criador (fotógrafo/autor):").pack(anchor="w")
-        self.creator_entry = ttk.Entry(creator_col)
+        # ------------------------------------------------------ 2. autoria
+        sec = self._secao(right, "Autoria")
+        esq, dir_ = self._dupla(sec)
+        ttk.Label(esq, text="Criador (fotógrafo/autor):").pack(anchor="w")
+        self.creator_entry = ttk.Entry(esq)
         self.creator_entry.pack(fill="x")
-        creator_url_col = ttk.Frame(creator_frame)
-        creator_url_col.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ttk.Label(creator_url_col, text="Site/contato do criador (opcional):").pack(anchor="w")
-        self.creator_url_entry = ttk.Entry(creator_url_col)
+        ttk.Label(dir_, text="Site ou contato:").pack(anchor="w")
+        self.creator_url_entry = ttk.Entry(dir_)
         self.creator_url_entry.pack(fill="x")
 
-        # Local (Sub-location IPTC): o lugar ESPECÍFICO dentro da cidade.
-        # Ganha linha inteira porque o texto costuma ser longo.
-        subloc_frame = ttk.Frame(right)
-        subloc_frame.pack(fill="x", pady=(10, 0))
-        ttk.Label(subloc_frame,
-                  text="Local (dentro da cidade — ex.: Praia de Copacabana, Teatro Municipal):"
-                  ).pack(anchor="w")
-        self.sublocation_entry = ttk.Entry(subloc_frame)
+        # ----------------------------------------------- 3. onde e quando
+        # A data mora aqui, e não ao lado da miniatura, porque é um campo
+        # que se digita — e porque data e lugar respondem à mesma
+        # pergunta sobre a foto.
+        sec = self._secao(right, "Onde e quando")
+        ttk.Label(sec, text="Local dentro da cidade "
+                            "(ex.: Praia de Copacabana, Teatro Municipal):").pack(anchor="w")
+        self.sublocation_entry = ttk.Entry(sec)
         self.sublocation_entry.pack(fill="x")
 
-        loc_frame = ttk.Frame(right)
-        loc_frame.pack(fill="x", pady=(6, 0))
-        col1 = ttk.Frame(loc_frame)
-        col1.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(col1, text="Cidade:").pack(anchor="w")
-        self.city_entry = ttk.Entry(col1)
-        self.city_entry.pack(fill="x")
-        col2 = ttk.Frame(loc_frame)
-        col2.pack(side="left", fill="x", expand=True, padx=5)
-        ttk.Label(col2, text="Estado/Província:").pack(anchor="w")
-        self.state_entry = ttk.Entry(col2)
-        self.state_entry.pack(fill="x")
-        col3 = ttk.Frame(loc_frame)
-        col3.pack(side="left", fill="x", expand=True, padx=5)
-        ttk.Label(col3, text="País:").pack(anchor="w")
-        self.country_entry = ttk.Entry(col3)
-        self.country_entry.pack(fill="x")
-        col4 = ttk.Frame(loc_frame)
-        col4.pack(side="left", padx=(5, 0))
-        ttk.Label(col4, text="Cód. ISO:").pack(anchor="w")
-        self.country_code_entry = ttk.Entry(col4, width=8)
-        self.country_code_entry.pack()
+        loc = ttk.Frame(sec)
+        loc.pack(fill="x", pady=(8, 0))
+        for rotulo, atributo, largura in (("Cidade:", "city_entry", None),
+                                          ("Estado/Província:", "state_entry", None),
+                                          ("País:", "country_entry", None),
+                                          ("Cód. ISO:", "country_code_entry", 8)):
+            col = ttk.Frame(loc)
+            if largura:
+                col.pack(side="left", padx=(6, 0))
+            else:
+                col.pack(side="left", fill="x", expand=True,
+                         padx=(0, 6) if atributo == "city_entry" else (6, 0))
+            ttk.Label(col, text=rotulo).pack(anchor="w")
+            campo = ttk.Entry(col, width=largura) if largura else ttk.Entry(col)
+            campo.pack(fill="x" if not largura else "none")
+            setattr(self, atributo, campo)
 
-        rights_frame1 = ttk.Frame(right)
-        rights_frame1.pack(fill="x", pady=(10, 0))
-        cr_col = ttk.Frame(rights_frame1)
-        cr_col.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(cr_col, text="Copyright (opcional):").pack(anchor="w")
-        self.copyright_entry = ttk.Entry(cr_col)
+        data = ttk.Frame(sec)
+        data.pack(fill="x", pady=(8, 0))
+        # A data é EDITÁVEL: câmera com data errada, foto escaneada e
+        # material de arquivo são casos reais em que ela precisa ser
+        # corrigida à mão. Vazio = mantém a da câmera.
+        ttk.Label(data, text="Data da captura (AAAA-MM-DD HH:MM):").pack(anchor="w")
+        self.date_entry = ttk.Entry(data)
+        self.date_entry.pack(fill="x")
+        ttk.Label(data, text="Em branco mantém a data que a câmera gravou.",
+                  style="Dim.TLabel").pack(anchor="w")
+
+        # ------------------------------------------------------ 4. direitos
+        sec = self._secao(right, "Direitos")
+        esq, dir_ = self._dupla(sec)
+        ttk.Label(esq, text="Copyright:").pack(anchor="w")
+        self.copyright_entry = ttk.Entry(esq)
         self.copyright_entry.pack(fill="x")
-        credit_col = ttk.Frame(rights_frame1)
-        credit_col.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ttk.Label(credit_col, text="Crédito (opcional):").pack(anchor="w")
-        self.credit_entry = ttk.Entry(credit_col)
+        ttk.Label(dir_, text="Crédito:").pack(anchor="w")
+        self.credit_entry = ttk.Entry(dir_)
         self.credit_entry.pack(fill="x")
 
-        rights_frame2 = ttk.Frame(right)
-        rights_frame2.pack(fill="x", pady=(10, 0))
-        source_col = ttk.Frame(rights_frame2)
-        source_col.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(source_col, text="Fonte (opcional):").pack(anchor="w")
-        self.source_entry = ttk.Entry(source_col)
+        esq, dir_ = self._dupla(sec, pady=(8, 0))
+        ttk.Label(esq, text="Fonte:").pack(anchor="w")
+        self.source_entry = ttk.Entry(esq)
         self.source_entry.pack(fill="x")
-        usage_col = ttk.Frame(rights_frame2)
-        usage_col.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ttk.Label(usage_col, text="Termos de uso/Licença (opcional):").pack(anchor="w")
-        self.usage_terms_entry = ttk.Entry(usage_col)
+        ttk.Label(dir_, text="Termos de uso / Licença:").pack(anchor="w")
+        self.usage_terms_entry = ttk.Entry(dir_)
         self.usage_terms_entry.pack(fill="x")
 
-        # ------------------------------------------- banco de imagens
-        ttk.Separator(right).pack(fill="x", pady=(14, 0))
-        ttk.Label(right, text="Banco de imagens", style="Section.TLabel").pack(anchor="w", pady=(10, 0))
-        ttk.Label(
-            right,
-            text="Campos que as agências passaram a exigir. Sem a declaração de "
-                 "origem, envios com IA são recusados; sem status de liberação, "
-                 "foto com pessoa reconhecível também.",
-            style="Dim.TLabel", wraplength=640, justify="left",
-        ).pack(anchor="w", pady=(0, 6))
+        # ---------------------------------------------- 5. banco de imagens
+        sec = self._secao(
+            right, "Banco de imagens",
+            "Sem a declaração de origem, envios com IA são recusados. Sem status "
+            "de liberação, foto com pessoa reconhecível também.")
 
-        ttk.Label(right, text="Título de venda (curto — é o que aparece na busca):").pack(anchor="w")
-        self.object_name_entry = ttk.Entry(right)
+        ttk.Label(sec, text="Título de venda (curto — é o que aparece na busca):").pack(anchor="w")
+        self.object_name_entry = ttk.Entry(sec)
         self.object_name_entry.pack(fill="x")
 
-        ttk.Label(right, text="Texto alternativo (acessibilidade — descreva a imagem em uma frase):").pack(anchor="w", pady=(8, 0))
-        self.alt_text_entry = ttk.Entry(right)
-        self.alt_text_entry.pack(fill="x")
-
-        ttk.Label(right, text="Descrição estendida (acessibilidade — opcional):").pack(anchor="w", pady=(8, 0))
-        self.ext_descr_text = tk.Text(right, height=2, wrap="word")
-        theme.style_text_card(self.ext_descr_text)
-        self.ext_descr_text.pack(fill="x")
-
-        origem_frame = ttk.Frame(right)
-        origem_frame.pack(fill="x", pady=(8, 0))
-        col_a = ttk.Frame(origem_frame)
-        col_a.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(col_a, text="Origem digital (declaração de IA):").pack(anchor="w")
+        ttk.Label(sec, text="Origem digital (declaração de IA):").pack(anchor="w", pady=(8, 0))
         self._digital_labels = [rot for _iri, rot in DIGITAL_SOURCES]
         self._digital_map = {rot: iri for iri, rot in DIGITAL_SOURCES}
         self.digital_source_var = tk.StringVar(value=self._digital_labels[0])
-        ttk.Combobox(col_a, textvariable=self.digital_source_var, state="readonly",
+        ttk.Combobox(sec, textvariable=self.digital_source_var, state="readonly",
                      values=self._digital_labels).pack(fill="x")
 
-        rel_frame = ttk.Frame(right)
-        rel_frame.pack(fill="x", pady=(8, 0))
-        col_b = ttk.Frame(rel_frame)
-        col_b.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        ttk.Label(col_b, text="Liberação de modelo:").pack(anchor="w")
+        esq, dir_ = self._dupla(sec, pady=(8, 0))
+        ttk.Label(esq, text="Liberação de modelo:").pack(anchor="w")
         self._model_labels = [rot for _v, rot in RELEASE_STATUSES]
         self._model_map = {rot: v for v, rot in RELEASE_STATUSES}
         self.model_release_var = tk.StringVar(value=self._model_labels[0])
-        ttk.Combobox(col_b, textvariable=self.model_release_var, state="readonly",
+        ttk.Combobox(esq, textvariable=self.model_release_var, state="readonly",
                      values=self._model_labels).pack(fill="x")
-        col_c = ttk.Frame(rel_frame)
-        col_c.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ttk.Label(col_c, text="Liberação de propriedade:").pack(anchor="w")
+        ttk.Label(dir_, text="Liberação de propriedade:").pack(anchor="w")
         self._prop_labels = [rot for _v, rot in PROPERTY_RELEASE_STATUSES]
         self._prop_map = {rot: v for v, rot in PROPERTY_RELEASE_STATUSES}
         self.property_release_var = tk.StringVar(value=self._prop_labels[0])
-        ttk.Combobox(col_c, textvariable=self.property_release_var, state="readonly",
+        ttk.Combobox(dir_, textvariable=self.property_release_var, state="readonly",
                      values=self._prop_labels).pack(fill="x")
 
-        ttk.Separator(right).pack(fill="x", pady=(14, 0))
-        self._build_resize_section(right)
+        # ----------------------------------------------- 6. acessibilidade
+        # Separado do banco de imagens de propósito: descrever a imagem
+        # para quem não a enxerga é outro assunto, e misturado com os
+        # campos comerciais passava despercebido.
+        sec = self._secao(
+            right, "Acessibilidade",
+            "Descreve a imagem para quem usa leitor de tela.")
+        ttk.Label(sec, text="Texto alternativo (uma frase):").pack(anchor="w")
+        self.alt_text_entry = ttk.Entry(sec)
+        self.alt_text_entry.pack(fill="x")
+        ttk.Label(sec, text="Descrição estendida:").pack(anchor="w", pady=(8, 0))
+        self.ext_descr_text = tk.Text(sec, height=2, wrap="word")
+        theme.style_text_card(self.ext_descr_text)
+        self.ext_descr_text.pack(fill="x")
 
+        # -------------------------------------------------- 7. dimensionar
+        sec = self._secao(right, "Dimensionar")
+        self._build_resize_section(sec)
+
+        # ---------------------------------------------- 8. campos avançados
+        sec = self._secao(right, "Campos avançados")
         self.custom_editor = CustomFieldsEditor(
-            right,
-            "Grava qualquer tag do ExifTool além do padrãozinho acima (ex.: \"XMP:Rating\", "
-            "\"IPTC:Urgency\"). Vale só pra esta foto/gravação — some ao abrir outra foto.",
+            sec,
+            "Grava qualquer tag do ExifTool além dos campos acima (ex.: \"XMP:Rating\", "
+            "\"IPTC:Urgency\"). Vale só pra esta foto — some ao abrir outra.",
+            titulo="",  # a seção já se chama "Campos avançados"
         )
-        self.custom_editor.pack(fill="x", pady=(12, 0))
+        self.custom_editor.pack(fill="x")
 
-        # roda do mouse em qualquer ponto do formulário, com a convenção
-        # de cada sistema operacional
-        bind_mousewheel(canvas, body)
-
-        # ------------------------------------ área de transferência
+        # ------------------------------------ 9. área de transferência
         # O gesto que isto serve: você acabou de etiquetar uma foto e a
         # próxima é do mesmo trabalho. Copiar e colar evita redigitar
         # autor, cidade, direitos e metade da legenda.
-        clip = theme.card(right)
-        clip.pack(fill="x", pady=(14, 0))
+        sec = self._secao(right, "Copiar de outra foto")
+        clip = theme.card(sec)
+        clip.pack(fill="x")
         linha = ttk.Frame(clip, style="Card.TFrame")
         linha.pack(fill="x")
         ttk.Label(linha, text="Área de transferência de metadados",
@@ -397,13 +395,48 @@ class MetadataTab(ttk.Frame):
                    command=self.on_copy_from_file).pack(side="left")
         self._refresh_clipboard_label()
 
-
         if not DND_AVAILABLE:
             ttk.Label(
                 right,
-                text="(arrastar-e-soltar indisponível nesta instalação — use o botão \"Abrir foto...\")",
-                foreground=theme.FG_DIM,
-            ).pack(anchor="w")
+                text="(arrastar-e-soltar indisponível nesta instalação — "
+                     "use o botão \"Abrir foto...\")",
+                style="Dim.TLabel",
+            ).pack(anchor="w", pady=(10, 0))
+
+        # roda do mouse em qualquer ponto do formulário, com a convenção
+        # de cada sistema operacional
+        bind_mousewheel(canvas, body)
+        bind_mousewheel(painel_canvas, painel_body)
+
+    # ------------------------------------------------ blocos de diagramação
+
+    def _cabecalho_secao(self, parent, titulo, primeira=False, descricao=None):
+        """Régua + título. A régua é o que separa um assunto do outro:
+        sem ela o formulário vira uma lista de vinte campos iguais."""
+        if not primeira:
+            ttk.Separator(parent).pack(fill="x", pady=(18, 0))
+        ttk.Label(parent, text=titulo, style="Section.TLabel").pack(
+            anchor="w", pady=(12 if not primeira else 0, 6))
+        if descricao:
+            ttk.Label(parent, text=descricao, style="Dim.TLabel",
+                      wraplength=620, justify="left").pack(anchor="w", pady=(0, 8))
+
+    def _secao(self, parent, titulo, descricao=None, primeira=False):
+        """Devolve o quadro onde os campos da seção entram."""
+        self._cabecalho_secao(parent, titulo, primeira=primeira, descricao=descricao)
+        corpo = ttk.Frame(parent)
+        corpo.pack(fill="x")
+        return corpo
+
+    def _dupla(self, parent, pady=(0, 0)):
+        """Duas colunas de mesma largura, com a calha no meio."""
+        linha = ttk.Frame(parent)
+        linha.pack(fill="x", pady=pady)
+        esq = ttk.Frame(linha)
+        esq.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        dir_ = ttk.Frame(linha)
+        dir_.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        return esq, dir_
 
     def _sticky_widgets(self):
         return {
@@ -564,7 +597,6 @@ class MetadataTab(ttk.Frame):
         nos metadados e deixa a imagem byte a byte idêntica. Por isso o
         padrão é gravar uma CÓPIA: recodificar por cima do original é
         irreversível."""
-        ttk.Label(parent, text="Redimensionar", style="Section.TLabel").pack(anchor="w", pady=(10, 0))
         ttk.Label(
             parent,
             text="Recodifica a imagem — por isso grava uma cópia por padrão. Os "

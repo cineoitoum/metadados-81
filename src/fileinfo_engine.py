@@ -156,6 +156,25 @@ def _bits(valor) -> str:
     return "%s bits" % " / ".join(partes)
 
 
+def _resolucao(valor, unidade) -> str:
+    """Resolução só quer dizer alguma coisa com a unidade junto.
+
+    Sem unidade declarada — o caso de todo JPEG gravado sem essa
+    intenção — o número é ruído, e o campo fica vazio. Antes isso virava
+    a string "1 None" na ficha, porque str(None).lower() não casa com
+    nenhuma unidade conhecida e caía no ramo que imprime o valor cru."""
+    if not valor:
+        return ""
+    u = str(unidade or "").strip().lower()
+    if u in ("inches", "inch", "2"):
+        return "%s dpi" % valor
+    if u in ("cm", "centimeters", "3"):
+        return "%s por cm" % valor
+    # "None", "1" ou ausente: o arquivo diz explicitamente que não há
+    # unidade, então não há resolução física a mostrar.
+    return ""
+
+
 def _proporcao(largura, altura) -> str:
     """Proporção reduzida — 6000x4000 vira 3:2."""
     try:
@@ -201,11 +220,7 @@ def describe(path: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
     largura = d.get("ImageWidth")
     altura = d.get("ImageHeight")
 
-    resolucao = ""
-    if d.get("XResolution"):
-        unidade = str(d.get("ResolutionUnit", "")).lower()
-        sufixo = "dpi" if "inch" in unidade or unidade in ("2", "") else str(d.get("ResolutionUnit"))
-        resolucao = "%s %s" % (d.get("XResolution"), sufixo)
+    resolucao = _resolucao(d.get("XResolution"), d.get("ResolutionUnit"))
 
     qualidade = estimate_jpeg_quality(path)
 

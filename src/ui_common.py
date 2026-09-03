@@ -133,13 +133,14 @@ class CustomFieldsEditor:
     (nome + valor), quantas quiser. Usado na aba de Metadados (single e
     lote)."""
 
-    def __init__(self, parent, hint_text):
+    def __init__(self, parent, hint_text, titulo="Campos avançados (personalizados) — opcional:"):
         self.container = ttk.Frame(parent)
         self.rows = []  # (row_frame, tag_entry, value_entry)
 
         header = ttk.Frame(self.container)
         header.pack(fill="x")
-        ttk.Label(header, text="Campos avançados (personalizados) — opcional:").pack(side="left")
+        if titulo:
+            ttk.Label(header, text=titulo).pack(side="left")
         ttk.Button(header, text="+ Adicionar campo", command=self.add_row).pack(side="right")
 
         ttk.Label(self.container, text=hint_text, foreground=theme.FG_DIM, wraplength=650, justify="left").pack(anchor="w")
