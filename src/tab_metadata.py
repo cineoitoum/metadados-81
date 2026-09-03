@@ -82,6 +82,7 @@ class MetadataTab(ttk.Frame):
         # O que dos campos personalizados já está gravado NESTA foto.
         # Sem isso, uma linha já salva era contada como alteração pendente.
         self._custom_salvos = {}
+        self._form_baseline = None
         self.thumb_imgtk = None  # precisa manter referência
 
         self._profile_labels = dict(list_profiles())
@@ -523,6 +524,9 @@ class MetadataTab(ttk.Frame):
         self._load_thumbnail(path)
         self.custom_editor.clear()  # campos avançados são específicos de cada gravação
         self._custom_salvos = {}
+        # retrato do formulário recém-montado: tudo o que divergir daqui
+        # pra frente foi a pessoa que digitou
+        self._form_baseline = self._collect_fields()
         self.status_label.configure(text="")
 
     def _fill_form(self, fields: PhotoFields):
@@ -671,32 +675,35 @@ class MetadataTab(ttk.Frame):
         self.resize_label.configure(text="Original: %d × %d px · %s" % (tamanho[0], tamanho[1], cadeado))
 
     def _form_differs_from_file(self):
-        """Há metadado digitado que ainda não está no arquivo?
+        """Há metadado DIGITADO por quem usa que ainda não foi salvo?
 
-        Compara o formulário com o que está gravado. Importa aqui porque
-        o redimensionamento copia os metadados DO ARQUIVO — o que só
-        existe na tela seria perdido na cópia sem o usuário perceber."""
+        Compara com o estado do formulário no momento em que a foto foi
+        aberta, não com o que está gravado no arquivo. A diferença
+        importa: campos fixos (criador, cidade, copyright) vêm
+        preenchidos das preferências e quase nunca estão no arquivo
+        ainda, então comparar com o arquivo dava "sim" em toda foto e o
+        aviso disparava sempre — a ponto do botão de redimensionar
+        parecer quebrado, porque só abria um diálogo.
+
+        Preenchimento automático não é edição. O que precisa de aviso é
+        o que a pessoa escreveu e ainda não gravou."""
         if not self.current_path:
             return False
-        try:
-            no_arquivo = read_existing_fields(self.current_path)
-        except Exception:
-            # Nao da pra comparar. Falhar pro lado seguro: assumir que ha
-            # algo por salvar, porque o custo de perguntar a toa e um
-            # clique e o custo de errar e o metadado do usuario no lixo.
-            return True
-        na_tela = self._collect_fields()
+
+        base = getattr(self, "_form_baseline", None)
+        if base is None:
+            return False
+
+        atual = self._collect_fields()
         for chave in ALL_FIELD_KEYS:
-            atual = getattr(na_tela, chave, None)
-            gravado = getattr(no_arquivo, chave, None)
+            agora = getattr(atual, chave, None)
+            antes = getattr(base, chave, None)
             if chave == "keywords":
-                if list(atual or []) != list(gravado or []):
+                if list(agora or []) != list(antes or []):
                     return True
-            elif (atual or "").strip() != (gravado or "").strip():
+            elif (agora or "").strip() != (antes or "").strip():
                 return True
-        # Campo personalizado nao vem do arquivo lido, entao nao da pra
-        # comparar: so conta como alteracao se ainda nao foi gravado nesta
-        # foto (o que on_save registra em _custom_salvos).
+
         return self.custom_editor.collect() != self._custom_salvos
 
     def _ask_metadata_choice(self):
@@ -1135,6 +1142,7 @@ class MetadataTab(ttk.Frame):
             return
 
         self._custom_salvos = dict(custom_fields)
+        self._form_baseline = fields
         save_prefs(self._current_sticky_prefs())
         self.status_label.configure(text="Metadados salvos com sucesso.", foreground=theme.SUCCESS)
         messagebox.showinfo("Salvo", "Metadados gravados no arquivo com sucesso.")

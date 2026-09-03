@@ -152,18 +152,43 @@ def test_colar_duas_vezes_nao_duplica_campos(aba, foto):
     assert len(aba.custom_editor.rows) == 1
 
 
-def test_leitura_falha_conta_como_alteracao_pendente(aba, foto):
-    """Falhar para o lado seguro: perguntar à toa custa um clique,
-    errar custa o metadado do usuário."""
-    import tab_metadata
+def test_campo_preenchido_sozinho_nao_conta_como_edicao(aba, foto):
+    """Os campos fixos (criador, cidade, copyright) vêm preenchidos das
+    preferências e quase nunca estão na foto ainda. Contá-los como
+    edição pendente fazia o aviso disparar em TODA foto, e o botão de
+    redimensionar parecia quebrado: só abria um diálogo."""
+    aba._open_photo(foto("recem_aberta.jpg"))
+    aba.update_idletasks()
 
-    aba._open_photo(foto("qualquer.jpg"))
+    assert aba._form_differs_from_file() is False
+
+
+def test_texto_digitado_conta_como_edicao(aba, foto):
+    aba._open_photo(foto("editada.jpg"))
     aba.update_idletasks()
     aba.caption_text.insert("1.0", "texto que não pode sumir")
 
-    with mock.patch("tab_metadata.read_existing_fields",
-                    side_effect=RuntimeError("falha de leitura")):
-        assert aba._form_differs_from_file() is True
+    assert aba._form_differs_from_file() is True
+
+
+def test_redimensionar_sem_edicao_nao_pergunta_nada(aba, foto, tmp_path):
+    """O sintoma relatado: clicar em aplicar e não acontecer nada."""
+    import tab_metadata
+
+    caminho = foto("redim.jpg")
+    aba._open_photo(caminho)
+    aba.update_idletasks()
+    aba.resize_w.delete(0, "end")
+    aba.resize_w.insert(0, "3000")
+
+    with mock.patch.object(aba, "_ask_metadata_choice") as pergunta, \
+         mock.patch.object(tab_metadata.messagebox, "showinfo"), \
+         mock.patch.object(tab_metadata.messagebox, "showerror"), \
+         mock.patch.object(tab_metadata.messagebox, "askyesno", return_value=True):
+        aba.on_resize()
+
+    assert not pergunta.called, "não devia perguntar nada — nada foi digitado"
+    assert os.path.exists(str(tmp_path / "redim_redim.jpg")), "a foto não foi gerada"
 
 
 def test_campo_personalizado_ja_salvo_nao_conta_como_pendente(aba, foto):
