@@ -99,8 +99,17 @@ vendor/
 
 # A RECEITA e versionada de proposito: foi a ausencia dela no repositorio
 # da v1.0 que tornou o DMG irreproduzivel.
+#
+# ATENCAO: estas duas linhas sao NEGACOES amplas e reincluem tudo que
+# estiver nessas pastas — inclusive o que foi ignorado la em cima. Foi
+# assim que um .pyc entrou no repositorio, e bytecode do Python carrega
+# dentro dele o caminho absoluto de onde foi compilado. As excecoes
+# abaixo tem que vir DEPOIS, senao a negacao vence.
 !packaging/**
 !assets/**
+packaging/**/__pycache__/
+assets/**/__pycache__/
+**/*.pyc
 
 # =====================================================================
 # Sistema e editores
