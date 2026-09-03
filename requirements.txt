@@ -1,4 +1,4 @@
-# CineBrain OS — dependências
+# Metadados 81 — dependências
 #
 # IMPORTANTE — Tcl/Tk 8.6 ou superior é obrigatório.
 #
@@ -16,12 +16,12 @@
 #     Linux    sudo apt install python3-tk
 #
 # O app checa isso na inicialização e avisa em vez de abrir em branco.
+#
+# A leitura e a escrita de metadados são do ExifTool, que vai embutido no
+# app e não é pacote Python — veja packaging/fetch_exiftool.py.
 
 Pillow>=9.0
-openpyxl>=3.8
-reportlab>=4.0
-piexif>=1.1
 
-# Opcional: habilita arrastar-e-soltar de arquivos nas abas.
+# Opcional: habilita arrastar-e-soltar de arquivos na janela.
 # O app funciona sem — só oculta a funcionalidade.
 tkinterdnd2>=0.3
